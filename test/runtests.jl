@@ -7,14 +7,13 @@ mylu = RecursiveFactorization.lu
 
 function testlu(A, MF, BF)
     @test MF.info == BF.info
-    @test MF.P == BF.P
     @test MF.L*MF.U ≈ A[MF.p, :]
     nothing
 end
 
 @testset "Test LU factorization" begin
-    for p in (Val(true), Val(false))
-        A = rand(100, 100)
+    for p in (Val(true), Val(false)), T in (Float64, Float32, ComplexF64, ComplexF32)
+        A = rand(T, 100, 100)
         MF = mylu(A, p)
         BF = baselu(A, p)
         testlu(A, MF, BF)
