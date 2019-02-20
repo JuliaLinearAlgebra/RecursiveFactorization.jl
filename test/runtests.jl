@@ -1,13 +1,17 @@
-using Test
+using  Test
 import RecursiveFactorization
 import LinearAlgebra
+using  LinearAlgebra: norm
+using  Random
+
+Random.seed!(12)
 
 baselu = LinearAlgebra.lu
 mylu = RecursiveFactorization.lu
 
 function testlu(A, MF, BF)
     @test MF.info == BF.info
-    @test MF.L*MF.U ≈ A[MF.p, :]
+    @test norm(MF.L*MF.U - A[MF.p, :], Inf) < sqrt(eps(real(first(A))))
     nothing
 end
 
