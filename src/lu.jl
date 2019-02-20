@@ -14,13 +14,17 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
-    reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
-    if m < n # fat matrix
-        # [AL AR]
-        AL = @view A[:, 1:m]
-        AR = @view A[:, m+1:n]
-        apply_permutation!(ipiv, AR)
-        ldiv!(UnitLowerTriangular(AL), AR)
+    if isconcretetype(T)
+        reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
+        if m < n # fat matrix
+            # [AL AR]
+            AL = @view A[:, 1:m]
+            AR = @view A[:, m+1:n]
+            apply_permutation!(ipiv, AR)
+            ldiv!(UnitLowerTriangular(AL), AR)
+        end
+      else # generic fallback
+        _generic_lufact!(A, pivot, ipiv, info)
     end
     check && checknonsingular(info[])
     LU{T, typeof(A)}(A, ipiv, info[])
