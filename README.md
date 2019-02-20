@@ -13,6 +13,22 @@ factorization algorithms.
 - Sivan Toledo's recursive left-looking LU algorithm. DOI:
   [10.1137/S0895479896297744](https://epubs.siam.org/doi/10.1137/S0895479896297744)
 
+#### Usage:
+
+`RecursiveFactorization` does not export any functions.
+
+```julia
+julia> using RecursiveFactorization
+
+julia> A = rand(5, 5);
+
+julia> RecursiveFactorization.lu(A); # out-of-place
+
+julia> RecursiveFactorization.lu!(copy(A)); # in-place
+
+julia> RecursiveFactorization.lu!(copy(A), Vector{Int}(undef, size(A, 2))); # in-place w/ pivoting vector
+```
+
 #### Performance:
 
 For small to medium sized matrices, it is beneficial to use
