@@ -15,14 +15,22 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     m, n = size(A)
     mnmin = min(m, n)
     reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
+    if m < n # fat matrix
+        # [AL AR]
+        AL = @view A[:, 1:m]
+        AR = @view A[:, m+1:n]
+        apply_permutation!(ipiv, AR)
+        ldiv!(UnitLowerTriangular(AL), AR)
+    end
     check && checknonsingular(info[])
     LU{T, typeof(A)}(A, ipiv, info[])
 end
 
-nsplit(::Type{Float64}, n) = n >= 16 ? ((n + 8) ÷ 16) * 8 : n ÷ 2
-nsplit(::Type{Float32}, n) = n >= 32 ? ((n + 16) ÷ 32) * 16 : n ÷ 2
-nsplit(::Type{ComplexF64}, n) = n >= 8 ? ((n + 4) ÷ 8) * 4 : n ÷ 2
-nsplit(::Type{ComplexF32}, n) = n >= 16 ? ((n + 8) ÷ 16) * 8 : n ÷ 2
+function nsplit(::Type{T}, n) where T
+    k = 128 ÷ sizeof(T)
+    k_2 = k ÷ 2
+    return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
+end
 
 Base.@propagate_inbounds function apply_permutation!(P, A)
     for i in axes(P, 1)

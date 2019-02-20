@@ -13,7 +13,7 @@ end
 
 @testset "Test LU factorization" begin
     for p in (Val(true), Val(false)), T in (Float64, Float32, ComplexF64, ComplexF32)
-        A = rand(T, 100, 100)
+        A = rand(T, 50, 100)
         MF = mylu(A, p)
         BF = baselu(A, p)
         testlu(A, MF, BF)
