@@ -1,12 +1,15 @@
-using LinearAlgebra: BlasInt, LU, UnitLowerTriangular, ldiv!, BLAS, checknonsingular
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, BLAS, checknonsingular
 
-lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true);
-    check::Bool = true, blocksize::Integer = 16) = lu!(copy(A), pivot;
-                                                        check = check, blocksize = blocksize)
+function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true);
+            check::Bool = true, blocksize::Integer = 16)
+    lu!(copy(A), pivot; check = check, blocksize = blocksize)
+end
 
-lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true);
-    check::Bool = true, blocksize::Integer = 16) = lu!(copy(A), Vector{BlasInt}(undef, min(size(A)...)), pivot;
-                                                        check = check, blocksize = blocksize)
+function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true);
+             check::Bool = true, blocksize::Integer = 16)
+    lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot;
+        check = check, blocksize = blocksize)
+end
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
@@ -14,7 +17,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
-    if isconcretetype(T)
+    if T <: BlasFloat && A isa StridedArray
         reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
         if m < n # fat matrix
             # [AL AR]
@@ -115,7 +118,7 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(A::StridedMatrix{T}, ::Val{Pivot}, ipiv, info) where {Pivot,T}
+function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
     m, n = size(A)
     minmn = length(ipiv)
     @inbounds begin
@@ -123,7 +126,7 @@ function _generic_lufact!(A::StridedMatrix{T}, ::Val{Pivot}, ipiv, info) where {
             # find index max
             kp = k
             if Pivot
-              amax = abs(zero(T))
+              amax = abs(zero(eltype(A)))
               for i = k:m
                   absi = abs(A[i,k])
                   if absi > amax
