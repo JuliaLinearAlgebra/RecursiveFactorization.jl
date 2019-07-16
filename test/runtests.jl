@@ -6,8 +6,8 @@ using  Random
 
 Random.seed!(12)
 
-baselu = LinearAlgebra.lu
-mylu = RecursiveFactorization.lu
+const baselu = LinearAlgebra.lu
+const mylu = RecursiveFactorization.lu
 
 function testlu(A, MF, BF)
     @test MF.info == BF.info
