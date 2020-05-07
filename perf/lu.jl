@@ -24,25 +24,31 @@ nb_mflops = Float64[]
 ref_mflops = Float64[]
 ns = 4:64:600
 for n in ns
-    @info "$n × $n"
-    A = rand(n, n)
+    global A = rand(n, n)
     bt = @belapsed LinearAlgebra.lu!(B) setup=(B = copy(A))
     push!(bas_mflops, luflop(n)/bt/1e9)
+    @info "$n × $n OpenBLAS: $(bas_mflops[end])"
 
     rt72 = @belapsed RecursiveFactorization.lu!(B; threshold=72) setup=(B = copy(A))
     push!(rec72_mflops, luflop(n)/rt72/1e9)
+    @info "$n × $n RF72: $(rec72_mflops[end])"
 
     rt80 = @belapsed RecursiveFactorization.lu!(B; threshold=80) setup=(B = copy(A))
     push!(rec80_mflops, luflop(n)/rt80/1e9)
+    @info "$n × $n RF80: $(rec80_mflops[end])"
 
     rt192 = @belapsed RecursiveFactorization.lu!(B; threshold=192) setup=(B = copy(A))
     push!(rec192_mflops, luflop(n)/rt192/1e9)
+    @info "$n × $n RF192: $(rec192_mflops[end])"
 
     nb = @belapsed RecursiveFactorization._generic_lufact!(B, Val(true), Vector{Int}(undef, $n), Ref(0)) setup=(B = copy(A))
     push!(nb_mflops, luflop(n)/nb/1e9)
+    @info "$n × $n No recursion: $(nb_mflops[end])"
 
     ref = @belapsed LinearAlgebra.generic_lufact!(B) setup=(B = copy(A))
     push!(ref_mflops, luflop(n)/ref/1e9)
+    @info "$n × $n Reference: $(ref_mflops[end])"
+    println()
 end
 
 using Plots
