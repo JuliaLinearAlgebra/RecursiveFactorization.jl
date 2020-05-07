@@ -19,7 +19,7 @@ end
 bas_mflops = Float64[]
 rec72_mflops = Float64[]
 rec80_mflops = Float64[]
-rec256_mflops = Float64[]
+rec192_mflops = Float64[]
 nb_mflops = Float64[]
 ref_mflops = Float64[]
 ns = 4:64:600
@@ -35,8 +35,8 @@ for n in ns
     rt80 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=80)
     push!(rec80_mflops, luflop(n)/rt80/1e9)
 
-    rt256 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=256)
-    push!(rec256_mflops, luflop(n)/rt256/1e9)
+    rt192 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=192)
+    push!(rec192_mflops, luflop(n)/rt192/1e9)
 
     nb = @belapsed RecursiveFactorization._generic_lufact!($(copy(A)), Val(true), Vector{Int}(undef, $n), Ref(0))
     push!(nb_mflops, luflop(n)/nb/1e9)
@@ -49,7 +49,7 @@ using Plots
 plt = plot(ns, bas_mflops, legend=:bottomright, lab="OpenBLAS", title="LU Factorization Benchmark", marker=:auto, dpi=150)
 plot!(plt, ns, rec72_mflops, lab="RF72", marker=:auto)
 plot!(plt, ns, rec80_mflops, lab="RF80", marker=:auto)
-plot!(plt, ns, rec80_mflops, lab="RF256", marker=:auto)
+plot!(plt, ns, rec192_mflops, lab="RF192", marker=:auto)
 plot!(plt, ns, nb_mflops, lab="No recursion", marker=:auto)
 plot!(plt, ns, ref_mflops, lab="Reference", marker=:auto)
 xaxis!(plt, "size (N x N)")
