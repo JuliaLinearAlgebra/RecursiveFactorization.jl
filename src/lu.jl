@@ -1,23 +1,21 @@
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, BLAS, checknonsingular
+using LoopVectorization: @avx
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, mul!, checknonsingular
 
-function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true);
-            check::Bool = true, blocksize::Integer = 16)
-    lu!(copy(A), pivot; check = check, blocksize = blocksize)
+function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
+    lu!(copy(A), pivot; kwargs...)
 end
 
-function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool = true, blocksize::Integer = 16)
-    lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot;
-        check = check, blocksize = blocksize)
+function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
+    lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot; kwargs...)
 end
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool=true, blocksize::Integer=16) where T
+             check::Bool=true, blocksize::Integer=16, threshold::Integer=192) where T
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
-    if T <: BlasFloat && A isa StridedArray
+    if A isa StridedArray && mnmin > threshold
         reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
         if m < n # fat matrix
             # [AL AR]
@@ -34,7 +32,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
 end
 
 function nsplit(::Type{T}, n) where T
-    k = 128 ÷ sizeof(T)
+    k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
@@ -44,7 +42,9 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
         i′ = P[i]
         i′ == i && continue
         @simd for j in axes(A, 2)
-            A[i, j], A[i′, j] = A[i′, j], A[i, j]
+            tmp = A[i, j]
+            A[i, j] = A[i′, j]
+            A[i′, j] = tmp
         end
     end
     nothing
@@ -98,7 +98,8 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # Schur complement:
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
-        BLAS.gemm!('N', 'N', -one(T), A21, A12, one(T), A22)
+        #mul!(A22, A21, A12, -one(T), one(T))
+        schur_complement!(A22, A21, A12)
         # record info
         previnfo = info[]
         # P2 A22 = L22 U22
@@ -107,11 +108,21 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         Pivot && apply_permutation!(P2, A21)
 
         info[] != previnfo && (info[] += n1)
-        @simd for i in 1:n2
+        @avx for i in 1:n2
             P2[i] += n1
         end
         return nothing
     end # inbounds
+end
+
+function schur_complement!(𝐂, 𝐀, 𝐁)
+    @avx for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+        𝐂ₘₙ = zero(eltype(𝐂))
+        for k ∈ 1:size(𝐀,2)
+            𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
+        end
+        𝐂[m,n] = 𝐂ₘₙ + 𝐂[m,n]
+    end
 end
 
 #=
@@ -147,15 +158,15 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
                 end
                 # Scale first column
                 Akkinv = inv(A[k,k])
-                @simd for i = k+1:m
+                @avx for i = k+1:m
                     A[i,k] *= Akkinv
                 end
             elseif info[] == 0
                 info[] = k
             end
             # Update the rest
-            for j = k+1:n
-                @simd for i = k+1:m
+            @avx for j = k+1:n
+                for i = k+1:m
                     A[i,j] -= A[i,k]*A[k,j]
                 end
             end
