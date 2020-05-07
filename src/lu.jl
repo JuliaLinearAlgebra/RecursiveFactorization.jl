@@ -11,7 +11,8 @@ end
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool=true, blocksize::Integer=16, threshold::Integer=192) where T
+             check::Bool=true, blocksize::Integer=128 ÷ (isbitstype(T) ? sizeof(T) : 8),
+             threshold::Integer=192) where T
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
@@ -24,14 +25,15 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
             apply_permutation!(ipiv, AR)
             ldiv!(UnitLowerTriangular(AL), AR)
         end
-      else # generic fallback
+    else
         _generic_lufact!(A, pivot, ipiv, info)
     end
     check && checknonsingular(info[])
     LU{T, typeof(A)}(A, ipiv, info[])
 end
 
-function nsplit(::Type{T}, n) where T
+@inline function nsplit(::Type{T}, n, blocksize) where T
+    #k = blocksize
     k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
@@ -56,7 +58,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
             _generic_lufact!(A, pivot, ipiv, info)
             return nothing
         end
-        n1 = nsplit(T, n)
+        n1 = nsplit(T, n, blocksize)
         n2 = n - n1
         m2 = m - n1
 
@@ -129,7 +131,7 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
+@noinline function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
     m, n = size(A)
     minmn = length(ipiv)
     @inbounds begin
