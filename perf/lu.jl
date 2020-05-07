@@ -26,22 +26,22 @@ ns = 4:64:600
 for n in ns
     @info "$n × $n"
     A = rand(n, n)
-    bt = @belapsed LinearAlgebra.lu!($(copy(A)))
+    bt = @belapsed LinearAlgebra.lu!(B) setup=(B = copy(A))
     push!(bas_mflops, luflop(n)/bt/1e9)
 
-    rt72 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=72)
+    rt72 = @belapsed RecursiveFactorization.lu!(B; threshold=72) setup=(B = copy(A))
     push!(rec72_mflops, luflop(n)/rt72/1e9)
 
-    rt80 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=80)
+    rt80 = @belapsed RecursiveFactorization.lu!(B; threshold=80) setup=(B = copy(A))
     push!(rec80_mflops, luflop(n)/rt80/1e9)
 
-    rt192 = @belapsed RecursiveFactorization.lu!($(copy(A)); threshold=192)
+    rt192 = @belapsed RecursiveFactorization.lu!(B; threshold=192) setup=(B = copy(A))
     push!(rec192_mflops, luflop(n)/rt192/1e9)
 
-    nb = @belapsed RecursiveFactorization._generic_lufact!($(copy(A)), Val(true), Vector{Int}(undef, $n), Ref(0))
+    nb = @belapsed RecursiveFactorization._generic_lufact!(B, Val(true), Vector{Int}(undef, $n), Ref(0)) setup=(B = copy(A))
     push!(nb_mflops, luflop(n)/nb/1e9)
 
-    ref = @belapsed LinearAlgebra.generic_lufact!($(copy(A)))
+    ref = @belapsed LinearAlgebra.generic_lufact!(B) setup=(B = copy(A))
     push!(ref_mflops, luflop(n)/ref/1e9)
 end
 
