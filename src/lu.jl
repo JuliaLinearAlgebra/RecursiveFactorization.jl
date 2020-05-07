@@ -1,4 +1,4 @@
-using LoopVectorization: @avx
+using LoopVectorization
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, mul!, checknonsingular
 
 function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
