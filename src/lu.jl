@@ -19,11 +19,11 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              # the performance is not sensitive wrt blocksize, and 16 is a good default
              blocksize::Integer=16,
              threshold::Integer=pick_threshold()) where T
-    info = Ref(zero(BlasInt))
+    info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
     if A isa StridedArray && mnmin > threshold
-        reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
+        info = reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
         if m < n # fat matrix
             # [AL AR]
             AL = @view A[:, 1:m]
@@ -31,11 +31,11 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
             apply_permutation!(ipiv, AR)
             ldiv!(UnitLowerTriangular(AL), AR)
         end
-      else # generic fallback
-        _generic_lufact!(A, pivot, ipiv, info)
+    else # generic fallback
+        info = _generic_lufact!(A, pivot, ipiv, info)
     end
-    check && checknonsingular(info[])
-    LU{T, typeof(A)}(A, ipiv, info[])
+    check && checknonsingular(info)
+    LU{T, typeof(A)}(A, ipiv, info)
 end
 
 function nsplit(::Type{T}, n) where T
@@ -57,11 +57,11 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
     nothing
 end
 
-function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::Nothing where {T,Pivot}
+function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::BlasInt where {T,Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            _generic_lufact!(A, pivot, ipiv, info)
-            return nothing
+            info = _generic_lufact!(A, pivot, ipiv, info)
+            return info
         end
         n1 = nsplit(T, n)
         n2 = n - n1
@@ -95,7 +95,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        reckernel!(AL, pivot, m, n1, P1, info, blocksize)
+        info = reckernel!(AL, pivot, m, n1, P1, info, blocksize)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
@@ -108,17 +108,17 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #mul!(A22, A21, A12, -one(T), one(T))
         schur_complement!(A22, A21, A12)
         # record info
-        previnfo = info[]
+        previnfo = info
         # P2 A22 = L22 U22
-        reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
+        info = reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21)
 
-        info[] != previnfo && (info[] += n1)
+        info != previnfo && (info += n1)
         @avx for i in 1:n2
             P2[i] += n1
         end
-        return nothing
+        return info
     end # inbounds
 end
 
@@ -168,8 +168,8 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
                 @avx for i = k+1:m
                     A[i,k] *= Akkinv
                 end
-            elseif info[] == 0
-                info[] = k
+            elseif info == 0
+                info = k
             end
             # Update the rest
             @avx for j = k+1:n
@@ -179,5 +179,5 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
             end
         end
     end
-    return nothing
+    return info
 end
