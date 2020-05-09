@@ -11,7 +11,11 @@ end
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool=true, blocksize::Integer=16, threshold::Integer=192) where T
+             check::Bool=true,
+             # the performance is not sensitive wrt blocksize, and 16 is a good default
+             blocksize::Integer=16,
+             # OpenBLAS' TRSM isn't very good, we use a higher threshold for recursion
+             threshold::Integer=BLAS.vendor() === :mkl ? 48 : 192) where T
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
