@@ -1,5 +1,5 @@
 using LoopVectorization
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, mul!, checknonsingular
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS
 
 function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
     lu!(copy(A), pivot; kwargs...)
@@ -9,13 +9,16 @@ function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
     lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot; kwargs...)
 end
 
+# Use a function here to make sure it gets optimized away
+# OpenBLAS' TRSM isn't very good, we use a higher threshold for recursion
+pick_threshold() = BLAS.vendor() === :mkl ? 48 : 192
+
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
              check::Bool=true,
              # the performance is not sensitive wrt blocksize, and 16 is a good default
              blocksize::Integer=16,
-             # OpenBLAS' TRSM isn't very good, we use a higher threshold for recursion
-             threshold::Integer=BLAS.vendor() === :mkl ? 48 : 192) where T
+             threshold::Integer=pick_threshold()) where T
     info = Ref(zero(BlasInt))
     m, n = size(A)
     mnmin = min(m, n)
