@@ -1,12 +1,19 @@
 using LoopVectorization
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
 
 function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
-    lu!(copy(A), pivot; kwargs...)
+    return lu!(copy(A), pivot; kwargs...)
 end
 
-function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
-    lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot; kwargs...)
+function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); check=true, kwargs...)
+    m, n  = size(A)
+    minmn = min(m, n)
+    F = if minmn < 10 # avx introduces small performance degradation
+        LinearAlgebra.generic_lufact!(A, pivot; check=check)
+    else
+        lu!(A, Vector{BlasInt}(undef, minmn), pivot; check=check, kwargs...)
+    end
+    return F
 end
 
 # Use a function here to make sure it gets optimized away
