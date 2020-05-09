@@ -3,8 +3,18 @@ import LinearAlgebra, RecursiveFactorization
 
 BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.08
 
-luflop(m, n) = n^3÷3 - n÷3 + m*n^2
-luflop(n) = luflop(n, n)
+function luflop(m, n=m; innerflop=2)
+    sum(1:min(m, n)) do k
+        invflop = 1
+        scaleflop = isempty(k+1:m) ? 0 : sum(k+1:m)
+        updateflop = isempty(k+1:n) ? 0 : sum(k+1:n) do j
+            isempty(k+1:m) ? 0 : sum(k+1:m) do i
+                innerflop
+            end
+        end
+        invflop + scaleflop + updateflop
+    end
+end
 
 bas_mflops = Float64[]
 rec8_mflops = Float64[]
