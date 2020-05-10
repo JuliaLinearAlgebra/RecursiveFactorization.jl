@@ -18,6 +18,8 @@ end
 
 bas_mflops = Float64[]
 rec_mflops = Float64[]
+rec4_mflops = Float64[]
+rec800_mflops = Float64[]
 ref_mflops = Float64[]
 ns = 4:8:500
 for n in ns
@@ -29,18 +31,34 @@ for n in ns
     rt = @belapsed RecursiveFactorization.lu!(B) setup=(B = copy(A))
     push!(rec_mflops, luflop(n)/rt/1e9)
 
+    rt4 = @belapsed RecursiveFactorization.lu!(B; threshold=4) setup=(B = copy(A))
+    push!(rec4_mflops, luflop(n)/rt4/1e9)
+
+    rt800 = @belapsed RecursiveFactorization.lu!(B; threshold=800) setup=(B = copy(A))
+    push!(rec800_mflops, luflop(n)/rt800/1e9)
+
     ref = @belapsed LinearAlgebra.generic_lufact!(B) setup=(B = copy(A))
     push!(ref_mflops, luflop(n)/ref/1e9)
 end
 
 using DataFrames, VegaLite
-df = DataFrame(Size = ns, RecursiveFactorization = rec_mflops, OpenBLAS = bas_mflops, Reference = ref_mflops)
-df = stack(df, [:RecursiveFactorization, :OpenBLAS, :Reference], variable_name = :Library, value_name = :GFLOPS)
+blaslib = BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
+df = DataFrame(Size = ns,
+               RecursiveFactorization = rec_mflops,
+               RecursiveFactorization4 = rec4_mflops,
+               RecursiveFactorization800 = rec800_mflops,
+               Reference = ref_mflops)
+setproperty!(df, blaslib, bas_mflops)
+df = stack(df, [:RecursiveFactorization,
+                :RecursiveFactorization4,
+                :RecursiveFactorization800,
+                blaslib,
+                :Reference], variable_name = :Library, value_name = :GFLOPS)
 plt = df |> @vlplot(
-        :line, color = :Library,
-        x = {:Size}, y = {:GFLOPS},
-        width = 2400, height = 600
-    )
+                    :line, color = {:Library, scale={scheme="category10"}},
+                    x = {:Size}, y = {:GFLOPS},
+                    width = 2400, height = 600
+                   )
 save(joinpath(homedir(), "Pictures", "lu_float64.png"), plt)
 
 #=
