@@ -1,7 +1,7 @@
 using BenchmarkTools
 using LinearAlgebra, RecursiveFactorization
 
-BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.08
+BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.5
 
 function luflop(m, n=m; innerflop=2)
     sum(1:min(m, n)) do k
@@ -22,14 +22,14 @@ ref_mflops = Float64[]
 ns = 4:8:500
 for n in ns
     @info "$n × $n"
-    A = rand(n, n)
-    bt = @belapsed LinearAlgebra.lu!($(copy(A)))
+    global A = rand(n, n)
+    bt = @belapsed LinearAlgebra.lu!(B) setup=(B = copy(A))
     push!(bas_mflops, luflop(n)/bt/1e9)
 
-    rt = @belapsed RecursiveFactorization.lu!($(copy(A)))
+    rt = @belapsed RecursiveFactorization.lu!(B) setup=(B = copy(A))
     push!(rec_mflops, luflop(n)/rt/1e9)
 
-    ref = @belapsed LinearAlgebra.generic_lufact!($(copy(A)))
+    ref = @belapsed LinearAlgebra.generic_lufact!(B) setup=(B = copy(A))
     push!(ref_mflops, luflop(n)/ref/1e9)
 end
 
