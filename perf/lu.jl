@@ -47,18 +47,18 @@ blaslib = BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
 df = DataFrame(Size = ns,
                Reference = ref_mflops)
 setproperty!(df, blaslib, bas_mflops)
-setproperty!(df, Symbol("RecursiveFactorization with default recursion threshold"), rec_mflops)
-setproperty!(df, Symbol("RecursiveFactorization fully recursive"), rec4_mflops)
-setproperty!(df, Symbol("RecursiveFactorization fully iterative"), rec800_mflops)
-df = stack(df, [Symbol("RecursiveFactorization with default recursion threshold"),
-                Symbol("RecursiveFactorization fully recursive"),
-                Symbol("RecursiveFactorization fully iterative"),
+setproperty!(df, Symbol("RF with default threshold"), rec_mflops)
+setproperty!(df, Symbol("RF fully recursive"), rec4_mflops)
+setproperty!(df, Symbol("RF fully iterative"), rec800_mflops)
+df = stack(df, [Symbol("RF with default threshold"),
+                Symbol("RF fully recursive"),
+                Symbol("RF fully iterative"),
                 blaslib,
                 :Reference], variable_name = :Library, value_name = :GFLOPS)
 plt = df |> @vlplot(
                     :line, color = {:Library, scale={scheme="category10"}},
                     x = {:Size}, y = {:GFLOPS},
-                    width = 2400, height = 600
+                    width = 1000, height = 600
                    )
 save(joinpath(homedir(), "Pictures", "lu_float64.png"), plt)
 
