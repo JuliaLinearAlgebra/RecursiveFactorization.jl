@@ -18,7 +18,14 @@ end
 
 # Use a function here to make sure it gets optimized away
 # AVX512 needs a smaller recursion limit
-pick_threshold() = LoopVectorization.VectorizationBase.AVX512F ? 48 : 192
+function pick_threshold()
+    blasvendor = BLAS.vendor()
+    if blasvendor === :openblas || blasvendor === :openblas64
+        LoopVectorization.VectorizationBase.AVX512F ? 110 : 192
+    else
+        LoopVectorization.VectorizationBase.AVX512F ? 48 : 72
+    end
+end
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
