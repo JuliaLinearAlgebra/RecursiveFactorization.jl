@@ -17,8 +17,8 @@ function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); check=true, kwa
 end
 
 # Use a function here to make sure it gets optimized away
-# OpenBLAS' TRSM isn't very good, we use a higher threshold for recursion
-pick_threshold() = BLAS.vendor() === :mkl ? 48 : 192
+# AVX512 needs a smaller recursion limit
+pick_threshold() = LoopVectorization.VectorizationBase.AVX512F ? 48 : 192
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
