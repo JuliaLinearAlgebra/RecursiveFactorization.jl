@@ -1,24 +1,36 @@
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, BLAS, checknonsingular
+using LoopVectorization
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
 
-function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true);
-            check::Bool = true, blocksize::Integer = 16)
-    lu!(copy(A), pivot; check = check, blocksize = blocksize)
+function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
+    return lu!(copy(A), pivot; kwargs...)
 end
 
-function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool = true, blocksize::Integer = 16)
-    lu!(A, Vector{BlasInt}(undef, min(size(A)...)), pivot;
-        check = check, blocksize = blocksize)
+function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); check=true, kwargs...)
+    m, n  = size(A)
+    minmn = min(m, n)
+    F = if minmn < 10 # avx introduces small performance degradation
+        LinearAlgebra.generic_lufact!(A, pivot; check=check)
+    else
+        lu!(A, Vector{BlasInt}(undef, minmn), pivot; check=check, kwargs...)
+    end
+    return F
 end
+
+# Use a function here to make sure it gets optimized away
+# OpenBLAS' TRSM isn't very good, we use a higher threshold for recursion
+pick_threshold() = BLAS.vendor() === :mkl ? 48 : 192
 
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool=true, blocksize::Integer=16) where T
-    info = Ref(zero(BlasInt))
+             check::Bool=true,
+             # the performance is not sensitive wrt blocksize, and 16 is a good default
+             blocksize::Integer=16,
+             threshold::Integer=pick_threshold()) where T
+    info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
-    if T <: BlasFloat && A isa StridedArray
-        reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
+    if A isa StridedArray && mnmin > threshold
+        info = reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
         if m < n # fat matrix
             # [AL AR]
             AL = @view A[:, 1:m]
@@ -26,15 +38,15 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
             apply_permutation!(ipiv, AR)
             ldiv!(UnitLowerTriangular(AL), AR)
         end
-      else # generic fallback
-        _generic_lufact!(A, pivot, ipiv, info)
+    else # generic fallback
+        info = _generic_lufact!(A, pivot, ipiv, info)
     end
-    check && checknonsingular(info[])
-    LU{T, typeof(A)}(A, ipiv, info[])
+    check && checknonsingular(info)
+    LU{T, typeof(A)}(A, ipiv, info)
 end
 
 function nsplit(::Type{T}, n) where T
-    k = 128 ÷ sizeof(T)
+    k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
@@ -44,17 +56,19 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
         i′ = P[i]
         i′ == i && continue
         @simd for j in axes(A, 2)
-            A[i, j], A[i′, j] = A[i′, j], A[i, j]
+            tmp = A[i, j]
+            A[i, j] = A[i′, j]
+            A[i′, j] = tmp
         end
     end
     nothing
 end
 
-function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::Nothing where {T,Pivot}
+function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::BlasInt where {T,Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            _generic_lufact!(A, pivot, ipiv, info)
-            return nothing
+            info = _generic_lufact!(A, pivot, ipiv, info)
+            return info
         end
         n1 = nsplit(T, n)
         n2 = n - n1
@@ -88,7 +102,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        reckernel!(AL, pivot, m, n1, P1, info, blocksize)
+        info = reckernel!(AL, pivot, m, n1, P1, info, blocksize)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
@@ -98,20 +112,31 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # Schur complement:
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
-        BLAS.gemm!('N', 'N', -one(T), A21, A12, one(T), A22)
+        #mul!(A22, A21, A12, -one(T), one(T))
+        schur_complement!(A22, A21, A12)
         # record info
-        previnfo = info[]
+        previnfo = info
         # P2 A22 = L22 U22
-        reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
+        info = reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21)
 
-        info[] != previnfo && (info[] += n1)
-        @simd for i in 1:n2
+        info != previnfo && (info += n1)
+        @avx for i in 1:n2
             P2[i] += n1
         end
-        return nothing
+        return info
     end # inbounds
+end
+
+function schur_complement!(𝐂, 𝐀, 𝐁)
+    @avx for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+        𝐂ₘₙ = zero(eltype(𝐂))
+        for k ∈ 1:size(𝐀,2)
+            𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
+        end
+        𝐂[m,n] = 𝐂ₘₙ + 𝐂[m,n]
+    end
 end
 
 #=
@@ -147,19 +172,19 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
                 end
                 # Scale first column
                 Akkinv = inv(A[k,k])
-                @simd for i = k+1:m
+                @avx for i = k+1:m
                     A[i,k] *= Akkinv
                 end
-            elseif info[] == 0
-                info[] = k
+            elseif info == 0
+                info = k
             end
             # Update the rest
-            for j = k+1:n
-                @simd for i = k+1:m
+            @avx for j = k+1:n
+                for i = k+1:m
                     A[i,j] -= A[i,k]*A[k,j]
                 end
             end
         end
     end
-    return nothing
+    return info
 end
