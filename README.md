@@ -35,4 +35,4 @@ For small to medium sized matrices, it is beneficial to use
 `RecursiveFactorization` over `OpenBLAS`. The benchmark script is available in
 `perf/lu.jl`
 
-![lubench](https://user-images.githubusercontent.com/17304743/53050761-1714e800-3468-11e9-916a-148fbb4fbbf8.png)
+![lubench](https://user-images.githubusercontent.com/17304743/81491200-555b1a80-9259-11ea-95c1-ae98b36f3779.png)
