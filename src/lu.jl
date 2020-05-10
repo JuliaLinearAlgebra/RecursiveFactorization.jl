@@ -16,12 +16,14 @@ function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); check=true, kwa
     return F
 end
 
-# Use a function here to make sure it gets optimized away
+const RECURSION_THRESHOLD = Ref(-1)
+
 # AVX512 needs a smaller recursion limit
 function pick_threshold()
     blasvendor = BLAS.vendor()
+    RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
     if blasvendor === :openblas || blasvendor === :openblas64
-        LoopVectorization.VectorizationBase.AVX512F ? 110 : 192
+        LoopVectorization.VectorizationBase.AVX512F ? 110 : 72
     else
         LoopVectorization.VectorizationBase.AVX512F ? 48 : 72
     end

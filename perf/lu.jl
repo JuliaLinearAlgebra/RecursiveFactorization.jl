@@ -1,4 +1,4 @@
-using BenchmarkTools
+using BenchmarkTools, Random
 using LinearAlgebra, RecursiveFactorization
 
 BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.5
@@ -24,7 +24,8 @@ ref_mflops = Float64[]
 ns = 4:8:500
 for n in ns
     @info "$n × $n"
-    global A = rand(n, n)
+    rng = MersenneTwister(123)
+    global A = rand(rng, n, n)
     bt = @belapsed LinearAlgebra.lu!(B) setup=(B = copy(A))
     push!(bas_mflops, luflop(n)/bt/1e9)
 
@@ -44,14 +45,14 @@ end
 using DataFrames, VegaLite
 blaslib = BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
 df = DataFrame(Size = ns,
-               RecursiveFactorization = rec_mflops,
-               RecursiveFactorization4 = rec4_mflops,
-               RecursiveFactorization800 = rec800_mflops,
                Reference = ref_mflops)
 setproperty!(df, blaslib, bas_mflops)
-df = stack(df, [:RecursiveFactorization,
-                :RecursiveFactorization4,
-                :RecursiveFactorization800,
+setproperty!(df, Symbol("RecursiveFactorization with default recursion threshold"), rec_mflops)
+setproperty!(df, Symbol("RecursiveFactorization fully recursive"), rec4_mflops)
+setproperty!(df, Symbol("RecursiveFactorization fully iterative"), rec800_mflops)
+df = stack(df, [Symbol("RecursiveFactorization with default recursion threshold"),
+                Symbol("RecursiveFactorization fully recursive"),
+                Symbol("RecursiveFactorization fully iterative"),
                 blaslib,
                 :Reference], variable_name = :Library, value_name = :GFLOPS)
 plt = df |> @vlplot(
