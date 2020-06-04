@@ -1,5 +1,5 @@
 using LoopVectorization
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
+using LinearAlgebra: BlasInt, BlasFloat, LU, UpperTriangular, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra, require_one_based_indexing, checksquare
 
 function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
     return lu!(copy(A), pivot; kwargs...)
@@ -35,6 +35,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              # the performance is not sensitive wrt blocksize, and 16 is a good default
              blocksize::Integer=16,
              threshold::Integer=pick_threshold()) where T
+    require_one_based_indexing(A, ipiv)
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
@@ -45,7 +46,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
             AL = @view A[:, 1:m]
             AR = @view A[:, m+1:n]
             apply_permutation!(ipiv, AR)
-            ldiv!(UnitLowerTriangular(AL), AR)
+            LinearAlgebra.ldiv!(UnitLowerTriangular(AL), AR)
         end
     else # generic fallback
         info = _generic_lufact!(A, pivot, ipiv, info)
@@ -117,7 +118,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # [ A22 ]    [ 0  ] [ A22 ]
         Pivot && apply_permutation!(P1, AR)
         # A12 = L11 U12  =>  U12 = L11 \ A12
-        ldiv!(UnitLowerTriangular(A11), A12)
+        LinearAlgebra.ldiv!(UnitLowerTriangular(A11), A12)
         # Schur complement:
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
@@ -196,4 +197,50 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
         end
     end
     return info
+end
+
+ldiv!(x::AbstractVector, F::LU, b::AbstractVector) = (copyto!(x, b); ldiv!(F, x))
+function ldiv!(F::LU, b::AbstractVector)
+    A = F.factors
+    require_one_based_indexing(A, b)
+    n = checksquare(F)
+    if n != size(b, 1)
+        throw(DimensionMismatch("matrix has dimensions ($n,$n) but right hand side has $(size(b,1)) rows"))
+    end
+    apply_ipiv!(F, b)
+    return ldiv!(UpperTriangular(A), ldiv!(UnitLowerTriangular(A), b))
+end
+
+function ldiv!(U::UpperTriangular, b::AbstractVector)
+    A = U.data
+    n = size(A, 2)
+    @inbounds for j in n:-1:1
+        xj = b[j] = A[j, j] \ b[j]
+        for i in j-1:-1:1
+            @fastmath b[i] -= A[i, j] * xj
+        end
+    end
+    b
+end
+
+function ldiv!(L::UnitLowerTriangular, b::AbstractVector)
+    A = L.data
+    n = size(A, 2)
+    @inbounds for j in 1:n
+        xj = b[j]
+        for i in j+1:n
+            @fastmath b[i] -= A[i, j] * xj
+        end
+    end
+    b
+end
+
+function apply_ipiv!(F::LU, b::AbstractVector)
+    ipiv = F.ipiv
+    @inbounds for i in eachindex(ipiv)
+        j = ipiv[i]
+        j == i && continue
+        b[i], b[j] = b[j], b[i]
+    end
+    return nothing
 end
