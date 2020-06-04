@@ -39,3 +39,35 @@ end
         end
     end
 end
+
+@testset "Test ldiv!" begin
+    for T in (Float64, Float32, ComplexF64, ComplexF32, Real), s in 1:50
+        @info("size: $s × $s, T = $T")
+        if isconcretetype(T)
+            A = randn(T, s, s)
+            b = randn(T, s)
+        else
+            _A = randn(s, s)
+            _b = randn(s)
+            A  = similar(_A, T, s, s)
+            copyto!(A, _A)
+            b = similar(_b, T, s)
+            copyto!(b, _b)
+        end
+        # just use LinearAlgebra.lu is fine, because we are testing `ldiv!`
+        F = lu(A)
+        _b = copy(b)
+        ref = ldiv!(F, copy(b))
+        # test alias
+        @test _b === RecursiveFactorization.ldiv!(F, _b)
+        # test precision
+        @test _b ≈ ref
+        _x = similar(b)
+        copyto!(_b, b)
+        # test alias
+        @test _x === RecursiveFactorization.ldiv!(_x, F, _b)
+        @test _b == b
+        # test precision
+        @test _x ≈ ref
+    end
+end
