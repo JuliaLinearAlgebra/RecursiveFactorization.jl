@@ -8,7 +8,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
 
 [compat]
-LoopVectorization = "0.7,0.8"
+LoopVectorization = "0.8.7"
 julia = "1.1"
 
 [extras]
