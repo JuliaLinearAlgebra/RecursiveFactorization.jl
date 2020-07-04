@@ -181,12 +181,13 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
                 end
                 # Scale first column
                 Akkinv = inv(A[k,k])
-                @avx for i = k+1:m
+                @avx check_empty=true for i = k+1:m
                     A[i,k] *= Akkinv
                 end
             elseif info == 0
                 info = k
             end
+            k == minmn && break 
             # Update the rest
             @avx for j = k+1:n
                 for i = k+1:m
