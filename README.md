@@ -1,6 +1,6 @@
 # RecursiveFactorization
 
-[![Build Status](https://travis-ci.org/YingboMa/RecursiveFactorization.jl.svg?branch=master)](https://travis-ci.org/YingboMa/RecursiveFactorization.jl)
+[![Github Action CI](https://github.com/YingboMa/RecursiveFactorization.jl/workflows/CI/badge.svg)](https://github.com/YingboMa/RecursiveFactorization.jl/actions)
 [![codecov](https://codecov.io/gh/YingboMa/RecursiveFactorization.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/YingboMa/RecursiveFactorization.jl)
 
 ---
