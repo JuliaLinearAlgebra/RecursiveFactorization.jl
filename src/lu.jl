@@ -23,9 +23,9 @@ function pick_threshold()
     blasvendor = BLAS.vendor()
     RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
     if blasvendor === :openblas || blasvendor === :openblas64
-        LoopVectorization.VectorizationBase.AVX512F ? 110 : 72
+        LoopVectorization.register_size() == 64 ? 110 : 72
     else
-        LoopVectorization.VectorizationBase.AVX512F ? 48 : 72
+        LoopVectorization.register_size() == 64 ? 48 : 72
     end
 end
 
