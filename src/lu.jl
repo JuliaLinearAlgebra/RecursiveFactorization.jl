@@ -1,17 +1,27 @@
 using LoopVectorization
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
 
-function lu(A::AbstractMatrix, pivot::Union{Val{false}, Val{true}} = Val(true); kwargs...)
-    return lu!(copy(A), pivot; kwargs...)
+# 1.7 compat
+normalize_pivot(t::Val{T}) where T = t
+to_stdlib_pivot(t) = t
+if VERSION >= v"1.7.0-DEV.1188"
+    normalize_pivot(::LinearAlgebra.RowMaximum) = Val(true)
+    normalize_pivot(::LinearAlgebra.NoPivot) = Val(false)
+    to_stdlib_pivot(::Val{true}) = LinearAlgebra.RowMaximum()
+    to_stdlib_pivot(::Val{false}) = LinearAlgebra.NoPivot()
 end
 
-function lu!(A, pivot::Union{Val{false}, Val{true}} = Val(true); check=true, kwargs...)
+function lu(A::AbstractMatrix, pivot = Val(true); kwargs...)
+    return lu!(copy(A), normalize_pivot(pivot); kwargs...)
+end
+
+function lu!(A, pivot = Val(true); check=true, kwargs...)
     m, n  = size(A)
     minmn = min(m, n)
     F = if minmn < 10 # avx introduces small performance degradation
-        LinearAlgebra.generic_lufact!(A, pivot; check=check)
+        LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check=check)
     else
-        lu!(A, Vector{BlasInt}(undef, minmn), pivot; check=check, kwargs...)
+        lu!(A, Vector{BlasInt}(undef, minmn), normalize_pivot(pivot); check=check, kwargs...)
     end
     return F
 end
@@ -29,12 +39,15 @@ function pick_threshold()
     end
 end
 
-function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
-             pivot::Union{Val{false}, Val{true}} = Val(true);
-             check::Bool=true,
-             # the performance is not sensitive wrt blocksize, and 16 is a good default
-             blocksize::Integer=16,
-             threshold::Integer=pick_threshold()) where T
+function lu!(
+    A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
+    pivot = Val(true);
+    check::Bool=true,
+    # the performance is not sensitive wrt blocksize, and 16 is a good default
+    blocksize::Integer=16,
+    threshold::Integer=pick_threshold()
+) where T
+    pivot = normalize_pivot(pivot)
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
@@ -187,7 +200,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
             elseif info == 0
                 info = k
             end
-            k == minmn && break 
+            k == minmn && break
             # Update the rest
             @avx for j = k+1:n
                 for i = k+1:m
