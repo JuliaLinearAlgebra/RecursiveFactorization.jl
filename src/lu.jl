@@ -30,8 +30,12 @@ const RECURSION_THRESHOLD = Ref(-1)
 
 # AVX512 needs a smaller recursion limit
 function pick_threshold()
-    blasvendor = BLAS.vendor()
     RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
+    blasvendor = @static if VERSION >= v"1.7.0-DEV.610"
+        :openblas64
+    else
+        BLAS.vendor()
+    end
     if blasvendor === :openblas || blasvendor === :openblas64
         LoopVectorization.register_size() == 64 ? 110 : 72
     else
