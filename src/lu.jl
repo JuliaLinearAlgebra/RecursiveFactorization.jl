@@ -1,5 +1,6 @@
 using LoopVectorization
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
+using TriangularSolve: ldiv!
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra
 
 # 1.7 compat
 normalize_pivot(t::Val{T}) where T = t
@@ -31,17 +32,13 @@ const RECURSION_THRESHOLD = Ref(-1)
 # AVX512 needs a smaller recursion limit
 function pick_threshold()
     RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
-    blasvendor = @static if VERSION >= v"1.7.0-DEV.610"
-        :openblas64
-    else
-        BLAS.vendor()
-    end
-    if blasvendor === :openblas || blasvendor === :openblas64
-        LoopVectorization.register_size() == 64 ? 110 : 72
-    else
-        LoopVectorization.register_size() == 64 ? 48 : 72
-    end
+    LoopVectorization.register_size() == 64 ? 48 : 72
 end
+
+recurse(::StridedArray) = true
+recurse(::LinearAlgebra.Adjoint{<:Any,<:StridedArray}) = true
+recurse(::LinearAlgebra.Transpose{<:Any,<:StridedArray}) = true
+recurse(_) = false
 
 function lu!(
     A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
@@ -55,9 +52,9 @@ function lu!(
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
-    if A isa StridedArray && mnmin > threshold
+    if recurse(A) && mnmin > threshold
         info = reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
-        if m < n # fat matrix
+        @inbounds if m < n # fat matrix
             # [AL AR]
             AL = @view A[:, 1:m]
             AR = @view A[:, m+1:n]
@@ -85,6 +82,19 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
             tmp = A[i, j]
             A[i, j] = A[i′, j]
             A[i′, j] = tmp
+        end
+    end
+    nothing
+end
+Base.@propagate_inbounds function apply_permutation!(P, A::Union{LinearAlgebra.Adjoint,LinearAlgebra.Transpose})
+    B = parent(A)
+    for i in axes(P, 1)
+        i′ = P[i]
+        i′ == i && continue
+        @simd ivdep for j in axes(B, 1)
+            tmp = B[j, i]
+            B[j, i] = B[j, i′]
+            B[j, i′] = tmp
         end
     end
     nothing
