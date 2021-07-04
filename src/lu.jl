@@ -32,7 +32,7 @@ const RECURSION_THRESHOLD = Ref(-1)
 # AVX512 needs a smaller recursion limit
 function pick_threshold()
     RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
-    LoopVectorization.register_size() == 64 ? 48 : 72
+    LoopVectorization.register_size() == 64 ? 48 : 40
 end
 
 recurse(::StridedArray) = true
@@ -45,7 +45,7 @@ function lu!(
     pivot = Val(true);
     check::Bool=true,
     # the performance is not sensitive wrt blocksize, and 16 is a good default
-    blocksize::Integer=16,
+    blocksize::Integer=8,
     threshold::Integer=pick_threshold()
 ) where T
     pivot = normalize_pivot(pivot)
@@ -75,27 +75,11 @@ function nsplit(::Type{T}, n) where T
 end
 
 Base.@propagate_inbounds function apply_permutation!(P, A)
-    for i in axes(P, 1)
+    @tturbo for j in axes(A, 2), i in axes(P, 1)
         i′ = P[i]
-        i′ == i && continue
-        @simd for j in axes(A, 2)
-            tmp = A[i, j]
-            A[i, j] = A[i′, j]
-            A[i′, j] = tmp
-        end
-    end
-    nothing
-end
-Base.@propagate_inbounds function apply_permutation!(P, A::Union{LinearAlgebra.Adjoint,LinearAlgebra.Transpose})
-    B = parent(A)
-    for i in axes(P, 1)
-        i′ = P[i]
-        i′ == i && continue
-        @simd ivdep for j in axes(B, 1)
-            tmp = B[j, i]
-            B[j, i] = B[j, i′]
-            B[j, i′] = tmp
-        end
+        tmp = A[i, j]
+        A[i, j] = A[i′, j]
+        A[i′, j] = tmp
     end
     nothing
 end
@@ -166,7 +150,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
 end
 
 function schur_complement!(𝐂, 𝐀, 𝐁)
-    @avx for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+    @tturbo for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
         𝐂ₘₙ = zero(eltype(𝐂))
         for k ∈ 1:size(𝐀,2)
             𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
