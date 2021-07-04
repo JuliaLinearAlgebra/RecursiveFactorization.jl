@@ -1,6 +1,7 @@
 using LoopVectorization
 using TriangularSolve: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra
+using StrideArraysCore
 
 # 1.7 compat
 normalize_pivot(t::Val{T}) where T = t
@@ -44,7 +45,7 @@ function lu!(
     A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     pivot = Val(true);
     check::Bool=true,
-    # the performance is not sensitive wrt blocksize, and 16 is a good default
+    # the performance is not sensitive wrt blocksize, and 8 is a good default
     blocksize::Integer=8,
     threshold::Integer=pick_threshold()
 ) where T
@@ -53,13 +54,13 @@ function lu!(
     m, n = size(A)
     mnmin = min(m, n)
     if recurse(A) && mnmin > threshold
-        info = reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
-        @inbounds if m < n # fat matrix
-            # [AL AR]
-            AL = @view A[:, 1:m]
-            AR = @view A[:, m+1:n]
-            apply_permutation!(ipiv, AR)
-            ldiv!(UnitLowerTriangular(AL), AR)
+        if T <: Union{Float32,Float64}
+            GC.@preserve ipiv A begin
+                Aptr = PtrArray(A); ipivptr = PtrArray(ipiv);
+                info = recurse!(Aptr, pivot, m, n, mnmin, ipivptr, info, blocksize)
+            end
+        else
+            info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize)
         end
     else # generic fallback
         info = _generic_lufact!(A, pivot, ipiv, info)
@@ -68,18 +69,33 @@ function lu!(
     LU{T, typeof(A)}(A, ipiv, info)
 end
 
-function nsplit(::Type{T}, n) where T
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize) where {Pivot}
+  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize)
+  @inbounds if m < n # fat matrix
+    # [AL AR]
+    AL = @view A[:, 1:m]
+    AR = @view A[:, m+1:n]
+    apply_permutation!(ipiv, AR)
+    ldiv!(UnitLowerTriangular(AL), AR)
+  end
+  info
+end
+
+@inline function nsplit(::Type{T}, n) where T
     k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
 Base.@propagate_inbounds function apply_permutation!(P, A)
-    @tturbo for j in axes(A, 2), i in axes(P, 1)
-        i′ = P[i]
-        tmp = A[i, j]
-        A[i, j] = A[i′, j]
-        A[i′, j] = tmp
+  batchsize = cld(2000, length(P))
+  LoopVectorization.@batch minbatch=batchsize for j in axes(A, 2)
+        @inbounds @simd for i in axes(P, 1)
+            i′ = P[i]
+            tmp = A[i, j]
+            A[i, j] = A[i′, j]
+            A[i′, j] = tmp
+        end
     end
     nothing
 end
@@ -87,7 +103,7 @@ end
 function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::BlasInt where {T,Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            info = _generic_lufact!(A, pivot, ipiv, info)
+            info = _generic_lufact!(A, Val(Pivot), ipiv, info)
             return info
         end
         n1 = nsplit(T, n)
@@ -122,7 +138,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        info = reckernel!(AL, pivot, m, n1, P1, info, blocksize)
+        info = reckernel!(AL, Val(Pivot), m, n1, P1, info, blocksize)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
@@ -137,7 +153,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # record info
         previnfo = info
         # P2 A22 = L22 U22
-        info = reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
+        info = reckernel!(A22, Val(Pivot), m2, n2, P2, info, blocksize)
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21)
 
