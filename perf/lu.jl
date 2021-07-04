@@ -1,6 +1,7 @@
 using BenchmarkTools, Random
-using LinearAlgebra, RecursiveFactorization
-BLAS.set_num_threads(1)
+using LinearAlgebra, RecursiveFactorization, VectorizationBase
+nc = min(Int(VectorizationBase.num_cores()), Threads.nthreads())
+BLAS.set_num_threads(nc)
 BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.5
 
 function luflop(m, n=m; innerflop=2)
@@ -65,7 +66,7 @@ plt = df |> @vlplot(
                     x = {:Size}, y = {:GFLOPS},
                     width = 1000, height = 600
                    )
-save(joinpath(homedir(), "Pictures", "lu_float64_$(VERSION)_$(Sys.CPU_NAME)_$blaslib.png"), plt)
+save(joinpath(homedir(), "Pictures", "lu_float64_$(VERSION)_$(Sys.CPU_NAME)_$(nc)cores_$blaslib.png"), plt)
 
 #=
 using Plot
