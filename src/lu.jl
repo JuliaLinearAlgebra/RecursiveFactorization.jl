@@ -46,7 +46,7 @@ function lu!(
     pivot = Val(true);
     check::Bool=true,
     # the performance is not sensitive wrt blocksize, and 8 is a good default
-    blocksize::Integer=8,
+    blocksize::Integer=length(A) ≥ 40_000 ? 8 : 16,
     threshold::Integer=pick_threshold()
 ) where T
     pivot = normalize_pivot(pivot)
@@ -56,8 +56,7 @@ function lu!(
     if recurse(A) && mnmin > threshold
         if T <: Union{Float32,Float64}
             GC.@preserve ipiv A begin
-                Aptr = PtrArray(A); ipivptr = PtrArray(ipiv);
-                info = recurse!(Aptr, pivot, m, n, mnmin, ipivptr, info, blocksize)
+                info = recurse!(PtrArray(A), pivot, m, n, mnmin, PtrArray(ipiv), info, blocksize)
             end
         else
             info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize)
