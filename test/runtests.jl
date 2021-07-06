@@ -32,9 +32,9 @@ end
             MF = mylu(A, p)
             BF = baselu(A, p)
             testlu(A, MF, BF)
-            MF = mylu(A', p)
-            BF = baselu(A', p)
-            testlu(A', MF, BF)
+            A′ = permutedims(A)
+            MF′ = mylu(A′', p)
+            testlu(A′', MF′, BF)
             i = rand(1:s) # test `MF.info`
             A[:, i] .= 0
             MF = mylu(A, p, check=false)
