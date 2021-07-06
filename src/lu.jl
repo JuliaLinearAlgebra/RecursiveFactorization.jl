@@ -2,6 +2,7 @@ using LoopVectorization
 using TriangularSolve: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra
 using StrideArraysCore
+using Polyester: @batch
 
 # 1.7 compat
 normalize_pivot(t::Val{T}) where T = t
@@ -86,11 +87,25 @@ end
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
-Base.@propagate_inbounds function apply_permutation!(P, A)
-  batchsize = cld(2000, length(P))
-  LoopVectorization.@batch minbatch=batchsize for j in axes(A, 2)
-        @inbounds @simd for i in axes(P, 1)
+@inline apply_permutation!(P, A) = apply_permutation!(P, A, RecursiveFactorization.LoopVectorization.VectorizationBase.contiguous_axis(A))
+Base.@propagate_inbounds function apply_permutation!(P, A, ca)
+    batchsize = cld(2000, length(P))
+    @batch minbatch=batchsize for j in axes(A, 2)
+        @inbounds @simd ivdep for i in axes(P, 1)
             i′ = P[i]
+            tmp = A[i, j]
+            A[i, j] = A[i′, j]
+            A[i′, j] = tmp
+        end
+    end
+    nothing
+end
+Base.@propagate_inbounds function apply_permutation!(P, A, ::LoopVectorization.StaticInt{2})
+    batchsize = cld(2000, length(P))
+    @batch minbatch=batchsize for i in axes(P, 1)
+        i′ = P[i]
+        i == i′ && continue
+        @inbounds @simd ivdep for j in axes(A, 2)
             tmp = A[i, j]
             A[i, j] = A[i′, j]
             A[i′, j] = tmp
