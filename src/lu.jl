@@ -1,6 +1,6 @@
 using LoopVectorization
 using TriangularSolve: ldiv!
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra, Adjoint, Transpose
 using StrideArraysCore
 using Polyester: @batch
 
@@ -27,6 +27,10 @@ function lu!(A, pivot = Val(true); check=true, kwargs...)
         lu!(A, Vector{BlasInt}(undef, minmn), normalize_pivot(pivot); check=check, kwargs...)
     end
     return F
+end
+
+for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!)
+  @eval $lu(A::$T, args...; kwargs...) = $f($lu(parent(A), args...; kwargs...))
 end
 
 const RECURSION_THRESHOLD = Ref(-1)
@@ -87,8 +91,7 @@ end
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
-@inline apply_permutation!(P, A) = apply_permutation!(P, A, RecursiveFactorization.LoopVectorization.VectorizationBase.contiguous_axis(A))
-Base.@propagate_inbounds function apply_permutation!(P, A, ca)
+function apply_permutation_threaded!(P, A)
     batchsize = cld(2000, length(P))
     @batch minbatch=batchsize for j in axes(A, 2)
         @inbounds @simd ivdep for i in axes(P, 1)
@@ -100,12 +103,12 @@ Base.@propagate_inbounds function apply_permutation!(P, A, ca)
     end
     nothing
 end
-Base.@propagate_inbounds function apply_permutation!(P, A, ::LoopVectorization.StaticInt{2})
-    batchsize = cld(2000, length(P))
-    @batch minbatch=batchsize for i in axes(P, 1)
+Base.@propagate_inbounds function apply_permutation!(P, A)
+    length(A) * sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(2)) && return apply_permutation_threaded!(P, A)
+    for i in axes(P, 1)
         i′ = P[i]
-        i == i′ && continue
-        @inbounds @simd ivdep for j in axes(A, 2)
+        i′ == i && continue
+        @simd for j in axes(A, 2)
             tmp = A[i, j]
             A[i, j] = A[i′, j]
             A[i′, j] = tmp
