@@ -14,6 +14,7 @@ function testlu(A, MF, BF)
     @test norm(MF.L*MF.U - A[MF.p, :], Inf) < 100sqrt(eps(real(one(float(first(A))))))
     nothing
 end
+testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
 
 @testset "Test LU factorization" begin
     for _p in (true, false), T in (Float64, Float32, ComplexF64, ComplexF32, Real)

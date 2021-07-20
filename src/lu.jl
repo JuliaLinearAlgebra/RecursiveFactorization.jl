@@ -103,8 +103,9 @@ function apply_permutation_threaded!(P, A)
     end
     nothing
 end
+_sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
 Base.@propagate_inbounds function apply_permutation!(P, A)
-    length(A) * sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(2)) && return apply_permutation_threaded!(P, A)
+    length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(2)) && return apply_permutation_threaded!(P, A)
     for i in axes(P, 1)
         i′ = P[i]
         i′ == i && continue
