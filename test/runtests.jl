@@ -11,7 +11,7 @@ const mylu = RecursiveFactorization.lu
 
 function testlu(A, MF, BF)
     @test MF.info == BF.info
-    @test norm(MF.L*MF.U - A[MF.p, :], Inf) < 100sqrt(eps(real(one(float(first(A))))))
+    @test norm(MF.L*MF.U - A[MF.p, :], Inf) < length(A)*sqrt(eps(real(one(float(first(A))))))/16
     nothing
 end
 testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
