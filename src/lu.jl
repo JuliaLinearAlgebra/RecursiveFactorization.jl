@@ -42,8 +42,6 @@ function pick_threshold()
 end
 
 recurse(::StridedArray) = true
-recurse(::LinearAlgebra.Adjoint{<:Any,<:StridedArray}) = true
-recurse(::LinearAlgebra.Transpose{<:Any,<:StridedArray}) = true
 recurse(_) = false
 
 function lu!(
