@@ -72,12 +72,13 @@ function lu!(
 end
 
 @inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize) where {Pivot}
-  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize)
+  thread = length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1))
+  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize, thread)
   @inbounds if m < n # fat matrix
     # [AL AR]
     AL = @view A[:, 1:m]
     AR = @view A[:, m+1:n]
-    apply_permutation!(ipiv, AR)
+    apply_permutation!(ipiv, AR, thread)
     ldiv!(UnitLowerTriangular(AL), AR)
   end
   info
@@ -102,8 +103,9 @@ function apply_permutation_threaded!(P, A)
     nothing
 end
 _sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
-Base.@propagate_inbounds function apply_permutation!(P, A)
-    length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1)) && return apply_permutation_threaded!(P, A)
+Base.@propagate_inbounds function apply_permutation!(P, A, thread)
+  thread && return apply_permutation_threaded!(P, A)
+    # length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1)) && return apply_permutation_threaded!(P, A)
     for i in axes(P, 1)
         i′ = P[i]
         i′ == i && continue
@@ -116,7 +118,7 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
     nothing
 end
 
-function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::BlasInt where {T,Pivot}
+function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize, thread)::BlasInt where {T,Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
             info = _generic_lufact!(A, Val(Pivot), ipiv, info)
@@ -154,11 +156,11 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        info = reckernel!(AL, Val(Pivot), m, n1, P1, info, blocksize)
+        info = reckernel!(AL, Val(Pivot), m, n1, P1, info, blocksize, thread)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
-        Pivot && apply_permutation!(P1, AR)
+        Pivot && apply_permutation!(P1, AR, thread)
         # A12 = L11 U12  =>  U12 = L11 \ A12
         ldiv!(UnitLowerTriangular(A11), A12)
         # Schur complement:
@@ -169,9 +171,9 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # record info
         previnfo = info
         # P2 A22 = L22 U22
-        info = reckernel!(A22, Val(Pivot), m2, n2, P2, info, blocksize)
+        info = reckernel!(A22, Val(Pivot), m2, n2, P2, info, blocksize, thread)
         # A21 <- P2 A21
-        Pivot && apply_permutation!(P2, A21)
+        Pivot && apply_permutation!(P2, A21, thread)
 
         info != previnfo && (info += n1)
         @avx for i in 1:n2
