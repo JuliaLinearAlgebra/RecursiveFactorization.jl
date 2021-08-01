@@ -1,5 +1,8 @@
 using LoopVectorization
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, ldiv!, checknonsingular, BLAS, LinearAlgebra
+using TriangularSolve: ldiv!
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS, LinearAlgebra, Adjoint, Transpose
+using StrideArraysCore
+using Polyester: @batch
 
 # 1.7 compat
 normalize_pivot(t::Val{T}) where T = t
@@ -26,43 +29,40 @@ function lu!(A, pivot = Val(true); check=true, kwargs...)
     return F
 end
 
+for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!)
+  @eval $lu(A::$T, args...; kwargs...) = $f($lu(parent(A), args...; kwargs...))
+end
+
 const RECURSION_THRESHOLD = Ref(-1)
 
 # AVX512 needs a smaller recursion limit
 function pick_threshold()
     RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
-    blasvendor = @static if VERSION >= v"1.7.0-DEV.610"
-        :openblas64
-    else
-        BLAS.vendor()
-    end
-    if blasvendor === :openblas || blasvendor === :openblas64
-        LoopVectorization.register_size() == 64 ? 110 : 72
-    else
-        LoopVectorization.register_size() == 64 ? 48 : 72
-    end
+    LoopVectorization.register_size() == 64 ? 48 : 40
 end
+
+recurse(::StridedArray) = true
+recurse(_) = false
 
 function lu!(
     A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     pivot = Val(true);
     check::Bool=true,
-    # the performance is not sensitive wrt blocksize, and 16 is a good default
-    blocksize::Integer=16,
+    # the performance is not sensitive wrt blocksize, and 8 is a good default
+    blocksize::Integer=length(A) ≥ 40_000 ? 8 : 16,
     threshold::Integer=pick_threshold()
 ) where T
     pivot = normalize_pivot(pivot)
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
-    if A isa StridedArray && mnmin > threshold
-        info = reckernel!(A, pivot, m, mnmin, ipiv, info, blocksize)
-        if m < n # fat matrix
-            # [AL AR]
-            AL = @view A[:, 1:m]
-            AR = @view A[:, m+1:n]
-            apply_permutation!(ipiv, AR)
-            ldiv!(UnitLowerTriangular(AL), AR)
+    if recurse(A) && mnmin > threshold
+        if T <: Union{Float32,Float64}
+            GC.@preserve ipiv A begin
+                info = recurse!(PtrArray(A), pivot, m, n, mnmin, PtrArray(ipiv), info, blocksize)
+            end
+        else
+            info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize)
         end
     else # generic fallback
         info = _generic_lufact!(A, pivot, ipiv, info)
@@ -71,13 +71,41 @@ function lu!(
     LU{T, typeof(A)}(A, ipiv, info)
 end
 
-function nsplit(::Type{T}, n) where T
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize) where {Pivot}
+  thread = length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1))
+  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize, thread)
+  @inbounds if m < n # fat matrix
+    # [AL AR]
+    AL = @view A[:, 1:m]
+    AR = @view A[:, m+1:n]
+    apply_permutation!(ipiv, AR, thread)
+    ldiv!(UnitLowerTriangular(AL), AR)
+  end
+  info
+end
+
+@inline function nsplit(::Type{T}, n) where T
     k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
-Base.@propagate_inbounds function apply_permutation!(P, A)
+function apply_permutation_threaded!(P, A)
+    batchsize = cld(2000, length(P))
+    @batch minbatch=batchsize for j in axes(A, 2)
+        @inbounds @simd ivdep for i in axes(P, 1)
+            i′ = P[i]
+            tmp = A[i, j]
+            A[i, j] = A[i′, j]
+            A[i′, j] = tmp
+        end
+    end
+    nothing
+end
+_sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
+Base.@propagate_inbounds function apply_permutation!(P, A, thread)
+  thread && return apply_permutation_threaded!(P, A)
+    # length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1)) && return apply_permutation_threaded!(P, A)
     for i in axes(P, 1)
         i′ = P[i]
         i′ == i && continue
@@ -90,10 +118,10 @@ Base.@propagate_inbounds function apply_permutation!(P, A)
     nothing
 end
 
-function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize)::BlasInt where {T,Pivot}
+function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize, thread)::BlasInt where {T,Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            info = _generic_lufact!(A, pivot, ipiv, info)
+            info = _generic_lufact!(A, Val(Pivot), ipiv, info)
             return info
         end
         n1 = nsplit(T, n)
@@ -128,11 +156,11 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        info = reckernel!(AL, pivot, m, n1, P1, info, blocksize)
+        info = reckernel!(AL, Val(Pivot), m, n1, P1, info, blocksize, thread)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
-        Pivot && apply_permutation!(P1, AR)
+        Pivot && apply_permutation!(P1, AR, thread)
         # A12 = L11 U12  =>  U12 = L11 \ A12
         ldiv!(UnitLowerTriangular(A11), A12)
         # Schur complement:
@@ -143,9 +171,9 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # record info
         previnfo = info
         # P2 A22 = L22 U22
-        info = reckernel!(A22, pivot, m2, n2, P2, info, blocksize)
+        info = reckernel!(A22, Val(Pivot), m2, n2, P2, info, blocksize, thread)
         # A21 <- P2 A21
-        Pivot && apply_permutation!(P2, A21)
+        Pivot && apply_permutation!(P2, A21, thread)
 
         info != previnfo && (info += n1)
         @avx for i in 1:n2
@@ -156,7 +184,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
 end
 
 function schur_complement!(𝐂, 𝐀, 𝐁)
-    @avx for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+    @tturbo for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
         𝐂ₘₙ = zero(eltype(𝐂))
         for k ∈ 1:size(𝐀,2)
             𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]

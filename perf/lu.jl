@@ -1,6 +1,7 @@
 using BenchmarkTools, Random
-using LinearAlgebra, RecursiveFactorization
-
+using LinearAlgebra, RecursiveFactorization, VectorizationBase
+nc = min(Int(VectorizationBase.num_cores()), Threads.nthreads())
+BLAS.set_num_threads(nc)
 BenchmarkTools.DEFAULT_PARAMETERS.seconds = 0.5
 
 function luflop(m, n=m; innerflop=2)
@@ -43,7 +44,12 @@ for n in ns
 end
 
 using DataFrames, VegaLite
-blaslib = BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
+blaslib = if VERSION ≥ v"1.7.0-beta2"
+  config = BLAS.get_config().loaded_libs
+  occursin("libmkl_rt", config[1].libname) ? :MKL : :OpenBLAS
+else
+  BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
+end
 df = DataFrame(Size = ns,
                Reference = ref_mflops)
 setproperty!(df, blaslib, bas_mflops)
@@ -60,7 +66,7 @@ plt = df |> @vlplot(
                     x = {:Size}, y = {:GFLOPS},
                     width = 1000, height = 600
                    )
-save(joinpath(homedir(), "Pictures", "lu_float64.png"), plt)
+save(joinpath(homedir(), "Pictures", "lu_float64_$(VERSION)_$(Sys.CPU_NAME)_$(nc)cores_$blaslib.png"), plt)
 
 #=
 using Plot

@@ -1,7 +1,7 @@
 using  Test
 import RecursiveFactorization
 import LinearAlgebra
-using  LinearAlgebra: norm
+using  LinearAlgebra: norm, Adjoint
 using  Random
 
 Random.seed!(12)
@@ -11,9 +11,10 @@ const mylu = RecursiveFactorization.lu
 
 function testlu(A, MF, BF)
     @test MF.info == BF.info
-    @test norm(MF.L*MF.U - A[MF.p, :], Inf) < 100sqrt(eps(real(one(float(first(A))))))
+    @test norm(MF.L*MF.U - A[MF.p, :], Inf) < length(A)*sqrt(eps(real(one(float(first(A))))))/16
     nothing
 end
+testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
 
 @testset "Test LU factorization" begin
     for _p in (true, false), T in (Float64, Float32, ComplexF64, ComplexF32, Real)
@@ -32,6 +33,9 @@ end
             MF = mylu(A, p)
             BF = baselu(A, p)
             testlu(A, MF, BF)
+            A′ = permutedims(A)
+            MF′ = mylu(A′', p)
+            testlu(A′', MF′, BF)
             i = rand(1:s) # test `MF.info`
             A[:, i] .= 0
             MF = mylu(A, p, check=false)
