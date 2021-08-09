@@ -2,6 +2,11 @@ module RecursiveFactorization
 
 include("./lu.jl")
 
-lu!(rand(2,2))
+let
+    while true
+        lu!(rand(2,2))
+        break
+    end
+end
 
 end # module
