@@ -13,7 +13,7 @@ TriangularSolve = "d5829a12-d9aa-46ab-831f-fb7c9ab06edf"
 [compat]
 LoopVectorization = "0.10,0.11, 0.12"
 Polyester = "0.3.2"
-StrideArraysCore = "0.1.13"
+StrideArraysCore = "0.1.13, 0.2"
 TriangularSolve = "0.1.1"
 julia = "1.5"
 
