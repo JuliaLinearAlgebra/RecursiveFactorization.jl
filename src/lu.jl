@@ -184,7 +184,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
 end
 
 function schur_complement!(𝐂, 𝐀, 𝐁)
-    @tturbo for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+    @tturbo warn_check_args=false for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
         𝐂ₘₙ = zero(eltype(𝐂))
         for k ∈ 1:size(𝐀,2)
             𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
