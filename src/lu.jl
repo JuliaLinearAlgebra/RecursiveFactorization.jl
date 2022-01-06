@@ -93,7 +93,7 @@ end
 function apply_permutation_threaded!(P, A)
     batchsize = cld(2000, length(P))
     @batch minbatch=batchsize for j in axes(A, 2)
-        @inbounds @simd ivdep for i in axes(P, 1)
+        @inbounds for i in axes(P, 1)
             i′ = P[i]
             tmp = A[i, j]
             A[i, j] = A[i′, j]
