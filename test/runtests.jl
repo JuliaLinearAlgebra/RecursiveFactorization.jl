@@ -33,14 +33,17 @@ testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
             MF = mylu(A, p)
             BF = baselu(A, p)
             testlu(A, MF, BF)
+            testlu(A, mylu(A, p, Val(false)), BF)
             A′ = permutedims(A)
             MF′ = mylu(A′', p)
             testlu(A′', MF′, BF)
+            testlu(A′', mylu(A′', p, Val(false)), BF)
             i = rand(1:s) # test `MF.info`
             A[:, i] .= 0
             MF = mylu(A, p, check=false)
             BF = baselu(A, p, check=false)
             testlu(A, MF, BF)
+            testlu(A, mylu(A, p, Val(false), check=false), BF)
         end
     end
 end

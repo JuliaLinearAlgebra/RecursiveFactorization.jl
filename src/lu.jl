@@ -14,17 +14,17 @@ if VERSION >= v"1.7.0-DEV.1188"
     to_stdlib_pivot(::Val{false}) = LinearAlgebra.NoPivot()
 end
 
-function lu(A::AbstractMatrix, pivot = Val(true); kwargs...)
-    return lu!(copy(A), normalize_pivot(pivot); kwargs...)
+function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(true); kwargs...)
+    return lu!(copy(A), normalize_pivot(pivot), thread; kwargs...)
 end
 
-function lu!(A, pivot = Val(true); check=true, kwargs...)
+function lu!(A, pivot = Val(true), thread = Val(true); check=true, kwargs...)
     m, n  = size(A)
     minmn = min(m, n)
     F = if minmn < 10 # avx introduces small performance degradation
         LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check=check)
     else
-        lu!(A, Vector{BlasInt}(undef, minmn), normalize_pivot(pivot); check=check, kwargs...)
+        lu!(A, Vector{BlasInt}(undef, minmn), normalize_pivot(pivot), thread; check=check, kwargs...)
     end
     return F
 end
@@ -46,7 +46,7 @@ recurse(_) = false
 
 function lu!(
     A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
-    pivot = Val(true);
+    pivot = Val(true), thread = Val(true);
     check::Bool=true,
     # the performance is not sensitive wrt blocksize, and 8 is a good default
     blocksize::Integer=length(A) ≥ 40_000 ? 8 : 16,
@@ -59,10 +59,10 @@ function lu!(
     if recurse(A) && mnmin > threshold
         if T <: Union{Float32,Float64}
             GC.@preserve ipiv A begin
-                info = recurse!(PtrArray(A), pivot, m, n, mnmin, PtrArray(ipiv), info, blocksize)
+                info = recurse!(PtrArray(A), pivot, m, n, mnmin, PtrArray(ipiv), info, blocksize, thread)
             end
         else
-            info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize)
+            info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize, thread)
         end
     else # generic fallback
         info = _generic_lufact!(A, pivot, ipiv, info)
@@ -71,18 +71,28 @@ function lu!(
     LU{T, typeof(A)}(A, ipiv, info)
 end
 
-@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize) where {Pivot}
-  thread = length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1))
-  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize, thread)
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize, ::Val{true}) where {Pivot}
+  if length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1))
+    _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(true))
+  else
+    _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(false))
+  end
+end
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize, ::Val{false}) where {Pivot}
+  _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(false))
+end
+@inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize, ::Val{Thread}) where {Pivot,Thread}
+  info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize, Val(Thread))
   @inbounds if m < n # fat matrix
     # [AL AR]
     AL = @view A[:, 1:m]
     AR = @view A[:, m+1:n]
-    apply_permutation!(ipiv, AR, thread)
-    ldiv!(UnitLowerTriangular(AL), AR)
+    apply_permutation!(ipiv, AR, Val(Thread))
+    ldiv!(UnitLowerTriangular(AL), AR, Val(Thread))
   end
   info
 end
+
 
 @inline function nsplit(::Type{T}, n) where T
     k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
@@ -90,7 +100,7 @@ end
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
-function apply_permutation_threaded!(P, A)
+function apply_permutation!(P, A, ::Val{true})
     batchsize = cld(2000, length(P))
     @batch minbatch=batchsize for j in axes(A, 2)
         @inbounds for i in axes(P, 1)
@@ -103,9 +113,7 @@ function apply_permutation_threaded!(P, A)
     nothing
 end
 _sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
-Base.@propagate_inbounds function apply_permutation!(P, A, thread)
-  thread && return apply_permutation_threaded!(P, A)
-    # length(A) * _sizeof(eltype(A)) > 0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1)) && return apply_permutation_threaded!(P, A)
+Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false})
     for i in axes(P, 1)
         i′ = P[i]
         i′ == i && continue
@@ -162,7 +170,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # [ A22 ]    [ 0  ] [ A22 ]
         Pivot && apply_permutation!(P1, AR, thread)
         # A12 = L11 U12  =>  U12 = L11 \ A12
-        ldiv!(UnitLowerTriangular(A11), A12)
+        ldiv!(UnitLowerTriangular(A11), A12, thread)
         # Schur complement:
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
@@ -176,7 +184,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         Pivot && apply_permutation!(P2, A21, thread)
 
         info != previnfo && (info += n1)
-        @avx for i in 1:n2
+        @turbo warn_check_args=false for i in 1:n2
             P2[i] += n1
         end
         return info
@@ -226,7 +234,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
                 end
                 # Scale first column
                 Akkinv = inv(A[k,k])
-                @avx check_empty=true for i = k+1:m
+                @turbo check_empty=true warn_check_args=false for i = k+1:m
                     A[i,k] *= Akkinv
                 end
             elseif info == 0
@@ -234,7 +242,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where Pivot
             end
             k == minmn && break
             # Update the rest
-            @avx for j = k+1:n
+            @turbo warn_check_args=false for j = k+1:n
                 for i = k+1:m
                     A[i,j] -= A[i,k]*A[k,j]
                 end
