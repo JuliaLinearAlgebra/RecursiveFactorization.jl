@@ -175,7 +175,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
         #mul!(A22, A21, A12, -one(T), one(T))
-        schur_complement!(A22, A21, A12,thread)
+        schur_complement!(A22, A21, A12, thread)
         # record info
         previnfo = info
         # P2 A22 = L22 U22
