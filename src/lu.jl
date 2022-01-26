@@ -175,7 +175,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
         #mul!(A22, A21, A12, -one(T), one(T))
-        schur_complement!(A22, A21, A12)
+        schur_complement!(A22, A21, A12, thread)
         # record info
         previnfo = info
         # P2 A22 = L22 U22
@@ -191,13 +191,24 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
     end # inbounds
 end
 
-function schur_complement!(𝐂, 𝐀, 𝐁)
-    @tturbo warn_check_args=false for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
-        𝐂ₘₙ = zero(eltype(𝐂))
-        for k ∈ 1:size(𝐀,2)
-            𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
+function schur_complement!(𝐂, 𝐀, 𝐁,::Val{THREAD}=Val(true)) where {THREAD}
+    # mul!(𝐂,𝐀,𝐁,-1,1)
+    if THREAD
+        @tturbo warn_check_args=false for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+            𝐂ₘₙ = zero(eltype(𝐂))
+            for k ∈ 1:size(𝐀,2)
+                𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
+            end
+            𝐂[m,n] = 𝐂ₘₙ + 𝐂[m,n]
         end
-        𝐂[m,n] = 𝐂ₘₙ + 𝐂[m,n]
+    else
+        @turbo warn_check_args=false for m ∈ 1:size(𝐀,1), n ∈ 1:size(𝐁,2)
+            𝐂ₘₙ = zero(eltype(𝐂))
+            for k ∈ 1:size(𝐀,2)
+                𝐂ₘₙ -= 𝐀[m,k] * 𝐁[k,n]
+            end
+            𝐂[m,n] = 𝐂ₘₙ + 𝐂[m,n]
+        end
     end
 end
 
