@@ -77,7 +77,7 @@ end
 @inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
                           ::Val{true}) where {Pivot}
     if length(A) * _sizeof(eltype(A)) >
-       0.92 * LoopVectorization.VectorizationBase.cache_size(Val(1))
+       0.92 * LoopVectorization.VectorizationBase.cache_size(Val(2))
         _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(true))
     else
         _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(false))
