@@ -101,7 +101,7 @@ end
 end
 
 @inline function nsplit(::Type{T}, n) where {T}
-    k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
+    k = max(2, 512 ÷ (isbitstype(T) ? sizeof(T) : 8))
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
