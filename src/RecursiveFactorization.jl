@@ -2,11 +2,8 @@ module RecursiveFactorization
 
 include("./lu.jl")
 
-let
-    while true
-        lu!(rand(2, 2))
-        break
-    end
-end
+import SnoopPrecompile
+
+SnoopPrecompile.@precompile_all_calls begin lu!(rand(2, 2)) end
 
 end # module
