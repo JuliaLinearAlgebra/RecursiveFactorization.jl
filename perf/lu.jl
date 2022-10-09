@@ -47,7 +47,7 @@ end
 using DataFrames, VegaLite
 blaslib = if VERSION ≥ v"1.7.0-beta2"
     config = BLAS.get_config().loaded_libs
-    occursin("libmkl_rt", config[1].libname) ? :MKL : :OpenBLAS
+    occursin("mkl_rt", config[1].libname) ? :MKL : :OpenBLAS
 else
     BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
 end
