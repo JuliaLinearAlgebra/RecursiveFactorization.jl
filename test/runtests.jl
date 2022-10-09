@@ -48,3 +48,25 @@ testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
         testlu(A, mylu(A, p, Val(false), check = false), BF)
     end
 end end
+
+function wilkinson(N)
+    A = zeros(N, N)
+    A[diagind(A)] .= 1
+    A[:, end] .= 1
+    for n in 1:(N - 1)
+        for r in (n + 1):N
+            @inbounds A[r, n] = -1
+        end
+    end
+    A
+end
+@testset "🦋" begin
+    ws800 = 🦋workspace(B800)
+    🦋mul!(copyto!(B800, A800), ws800)
+    U800, V800 = materializeUV(B800, ws800)
+    F800 = RecursiveFactorization.lu!(B800, Val(false))
+
+    b = rand(800)
+    x = V800 * (F800 \ (U800 * b))
+    @test norm(A800 * x .- b) <= 1e-13
+end
