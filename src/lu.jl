@@ -61,7 +61,8 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     mnmin = min(m, n)
     if recurse(A) && mnmin > threshold
         if T <: Union{Float32, Float64}
-            GC.@preserve ipiv A begin info = recurse!(PtrArray(A), pivot, m, n, mnmin,
+            GC.@preserve ipiv A begin info = recurse!(view(PtrArray(A), axes(A)...), pivot,
+                                                      m, n, mnmin,
                                                       PtrArray(ipiv), info, blocksize,
                                                       thread) end
         else
@@ -165,6 +166,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # [P2]
         P1 = @view ipiv[1:n1]
         P2 = @view ipiv[(n1 + 1):n]
+
         # ========================================
 
         #   [ A11 ]   [ L11 ]
