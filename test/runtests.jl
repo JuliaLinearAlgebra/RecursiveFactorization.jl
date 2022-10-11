@@ -51,7 +51,7 @@ end end
 
 function wilkinson(N)
     A = zeros(N, N)
-    A[diagind(A)] .= 1
+    A[1:(N+1):N*N] .= 1
     A[:, end] .= 1
     for n in 1:(N - 1)
         for r in (n + 1):N
@@ -61,12 +61,14 @@ function wilkinson(N)
     A
 end
 @testset "🦋" begin
-    ws800 = 🦋workspace(B800)
-    🦋mul!(copyto!(B800, A800), ws800)
-    U800, V800 = materializeUV(B800, ws800)
+    A800 = wilkinson(800);
+    B800 = similar(A800);
+    ws800 = RecursiveFactorization.🦋workspace(B800)
+    RecursiveFactorization.🦋mul!(copyto!(B800, A800), ws800)
+    U800, V800 = RecursiveFactorization.materializeUV(B800, ws800)
     F800 = RecursiveFactorization.lu!(B800, Val(false))
 
     b = rand(800)
     x = V800 * (F800 \ (U800 * b))
-    @test norm(A800 * x .- b) <= 1e-13
+    @test norm(A800 * x .- b) <= 1e-12
 end

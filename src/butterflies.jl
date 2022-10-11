@@ -1,5 +1,6 @@
 
 using VectorizedRNG
+using LinearAlgebra: Diagonal, I
 
 @inline exphalf(x) = exp(x) * oftype(x, 0.5)
 function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
