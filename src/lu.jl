@@ -38,13 +38,8 @@ for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!
     @eval $lu(A::$T, args...; kwargs...) = $f($lu(parent(A), args...; kwargs...))
 end
 
-const RECURSION_THRESHOLD = Ref(-1)
-
 # AVX512 needs a smaller recursion limit
-function pick_threshold()
-    RECURSION_THRESHOLD[] >= 0 && return RECURSION_THRESHOLD[]
-    LoopVectorization.register_size() == 64 ? 48 : 40
-end
+pick_threshold() = LoopVectorization.register_size() == 64 ? 48 : 40
 
 recurse(::StridedArray) = true
 recurse(_) = false
@@ -102,7 +97,7 @@ end
 end
 
 @inline function nsplit(::Type{T}, n) where {T}
-    k = 512 ÷ (isbitstype(T) ? sizeof(T) : 8)
+    k = max(2, 512 ÷ (isbitstype(T) ? sizeof(T) : 8))
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
