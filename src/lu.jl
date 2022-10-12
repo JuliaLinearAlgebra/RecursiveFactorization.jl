@@ -22,19 +22,33 @@ function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(true); kwargs...)
     return lu!(copy(A), normalize_pivot(pivot), thread; kwargs...)
 end
 
-struct NotIPIV <: AbstractVector{BlasInt} len::Int end
+struct NotIPIV <: AbstractVector{BlasInt}
+    len::Int
+end
 Base.size(A::NotIPIV) = (A.len,)
 Base.getindex(::NotIPIV, i::Int) = i
 Base.view(::NotIPIV, r::AbstractUnitRange) = NotIPIV(length(r))
 init_pivot(::Val{false}, minmn) = NotIPIV(minmn)
 init_pivot(::Val{true}, minmn) = Vector{BlasInt}(undef, minmn)
 
+if isdefined(LinearAlgebra, :_ipiv_cols!)
+    function LinearAlgebra._ipiv_cols!(::LU{<:Any, <:Any, NotIPIV}, ::OrdinalRange,
+                                       B::StridedVecOrMat)
+        return B
+    end
+end
+if isdefined(LinearAlgebra, :_ipiv_rows!)
+    function LinearAlgebra._ipiv_rows!(::LU{<:Any, <:Any, NotIPIV}, ::OrdinalRange,
+                                       B::StridedVecOrMat)
+        return B
+    end
+end
 
 function lu!(A, pivot = Val(true), thread = Val(true); check = true, kwargs...)
     m, n = size(A)
     minmn = min(m, n)
     # we want the type on both branches to match. When pivot = Val(false), we construct
-    # a `NotIPIV`, which `LinearAlgebra.generic_lufact!` does not.
+    # a `NotIPIV`, which `LinearAlgebra.generic_lufact!` does not. 
     F = if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
         LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check = check)
     else
@@ -102,8 +116,8 @@ end
         # [AL AR]
         AL = @view A[:, 1:m]
         AR = @view A[:, (m + 1):n]
-        apply_permutation!(ipiv, AR, Val(Thread))
-        ldiv!(_unit_lower_triangular(AL), AR, Val(Thread))
+        apply_permutation!(ipiv, AR, Val{Thread}())
+        ldiv!(_unit_lower_triangular(AL), AR, Val{Thread}())
     end
     info
 end
