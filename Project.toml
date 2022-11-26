@@ -1,7 +1,7 @@
 name = "RecursiveFactorization"
 uuid = "f2c3362d-daeb-58d1-803e-2bc74f2840b4"
 authors = ["Yingbo Ma <mayingbo5@gmail.com>"]
-version = "0.2.13"
+version = "0.2.12"
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -15,7 +15,7 @@ TriangularSolve = "d5829a12-d9aa-46ab-831f-fb7c9ab06edf"
 LoopVectorization = "0.10,0.11, 0.12"
 Polyester = "0.3.2,0.4.1, 0.5, 0.6"
 SnoopPrecompile = "1"
-StrideArraysCore = "0.1.13, 0.2.1, 0.3, 0.4"
+StrideArraysCore = "0.1.13, 0.2.1, 0.3"
 TriangularSolve = "0.1.1"
 julia = "1.5"
 
