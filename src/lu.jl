@@ -93,7 +93,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         info = _generic_lufact!(A, pivot, ipiv, info)
     end
     check && checknonsingular(info)
-    LU{T, typeof(A), typeof(ipiv)}(A, ipiv, info)
+    LU(A, ipiv, info)
 end
 
 @inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
