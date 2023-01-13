@@ -22,37 +22,13 @@ function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(true); kwargs...)
     return lu!(copy(A), normalize_pivot(pivot), thread; kwargs...)
 end
 
-struct NotIPIV <: AbstractVector{BlasInt}
-    len::Int
-end
-Base.size(A::NotIPIV) = (A.len,)
-Base.getindex(::NotIPIV, i::Int) = i
-Base.view(::NotIPIV, r::AbstractUnitRange) = NotIPIV(length(r))
-init_pivot(::Val{false}, minmn) = NotIPIV(minmn)
-init_pivot(::Val{true}, minmn) = Vector{BlasInt}(undef, minmn)
-
-if isdefined(LinearAlgebra, :_ipiv_cols!)
-    function LinearAlgebra._ipiv_cols!(::LU{<:Any, <:Any, NotIPIV}, ::OrdinalRange,
-                                       B::StridedVecOrMat)
-        return B
-    end
-end
-if isdefined(LinearAlgebra, :_ipiv_rows!)
-    function LinearAlgebra._ipiv_rows!(::LU{<:Any, <:Any, NotIPIV}, ::OrdinalRange,
-                                       B::StridedVecOrMat)
-        return B
-    end
-end
-
 function lu!(A, pivot = Val(true), thread = Val(true); check = true, kwargs...)
     m, n = size(A)
     minmn = min(m, n)
-    # we want the type on both branches to match. When pivot = Val(false), we construct
-    # a `NotIPIV`, which `LinearAlgebra.generic_lufact!` does not. 
-    F = if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
+    F = if minmn < 10 # avx introduces small performance degradation
         LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check = check)
     else
-        lu!(A, init_pivot(pivot, minmn), normalize_pivot(pivot), thread; check = check,
+        lu!(A, Vector{BlasInt}(undef, minmn), normalize_pivot(pivot), thread; check = check,
             kwargs...)
     end
     return F
@@ -68,8 +44,6 @@ pick_threshold() = LoopVectorization.register_size() == 64 ? 48 : 40
 recurse(::StridedArray) = true
 recurse(_) = false
 
-_ptrarray(ipiv) = PtrArray(ipiv)
-_ptrarray(ipiv::NotIPIV) = ipiv
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
              pivot = Val(true), thread = Val(true);
              check::Bool = true,
@@ -84,7 +58,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         if T <: Union{Float32, Float64}
             GC.@preserve ipiv A begin info = recurse!(view(PtrArray(A), axes(A)...), pivot,
                                                       m, n, mnmin,
-                                                      _ptrarray(ipiv), info, blocksize,
+                                                      PtrArray(ipiv), info, blocksize,
                                                       thread) end
         else
             info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize, thread)
@@ -116,8 +90,8 @@ end
         # [AL AR]
         AL = @view A[:, 1:m]
         AR = @view A[:, (m + 1):n]
-        apply_permutation!(ipiv, AR, Val{Thread}())
-        ldiv!(_unit_lower_triangular(AL), AR, Val{Thread}())
+        apply_permutation!(ipiv, AR, Val(Thread))
+        ldiv!(_unit_lower_triangular(AL), AR, Val(Thread))
     end
     info
 end
@@ -213,10 +187,8 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         Pivot && apply_permutation!(P2, A21, thread)
 
         info != previnfo && (info += n1)
-        if Pivot
-            @turbo warn_check_args=false for i in 1:n2
-                P2[i] += n1
-            end
+        @turbo warn_check_args=false for i in 1:n2
+            P2[i] += n1
         end
         return info
     end # inbounds
@@ -262,8 +234,8 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
                     amax = absi
                 end
             end
-            ipiv[k] = kp
         end
+        ipiv[k] = kp
         if !iszero(A[kp, k])
             if k != kp
                 # Interchange
