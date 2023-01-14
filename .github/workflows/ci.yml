@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        julia-version: ['1', '^1.7.0-0']
+        julia-version: ['1', '1.6']
         threads:
           - '1'
           - '3'
