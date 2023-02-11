@@ -15,6 +15,10 @@ function testlu(A, MF, BF)
     nothing
 end
 testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
+if isdefined(LinearAlgebra, :AdjointFactorization)
+    testlu(A::LinearAlgebra.AdjointFactorization, MF::LinearAlgebra.AdjointFactorization, BF) =
+        testlu(parent(A), parent(MF), BF)
+end
 
 @testset "Test LU factorization" begin for _p in (true, false),
                                            T in (Float64, Float32, ComplexF64, ComplexF32,
