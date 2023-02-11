@@ -1,7 +1,7 @@
 using Test
 import RecursiveFactorization
 import LinearAlgebra
-using LinearAlgebra: norm, Adjoint
+using LinearAlgebra: norm, Adjoint, Transpose
 using Random
 
 Random.seed!(12)
