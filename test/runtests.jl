@@ -16,9 +16,9 @@ function testlu(A, MF, BF)
 end
 testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
 if isdefined(LinearAlgebra, :AdjointFactorization)
-    testlu(A::Adjoint, MF::LinearAlgebra.AdjointFactorization, BF) =
+    testlu(A::Adjoint, MF, BF) =
         testlu(parent(A), parent(MF), BF)
-    testlu(A::Transpose, MF::LinearAlgebra.TransposeFactorization, BF) =
+    testlu(A::Transpose, MF, BF) =
         testlu(parent(A), parent(MF), BF)
 end
 
