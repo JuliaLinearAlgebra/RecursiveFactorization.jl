@@ -14,13 +14,7 @@ function testlu(A, MF, BF)
     @test norm(MF.L * MF.U - A[MF.p, :], Inf) < 200sqrt(eps(real(one(float(first(A))))))
     nothing
 end
-testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
-if isdefined(LinearAlgebra, :AdjointFactorization)
-    testlu(A::Adjoint, MF, BF) =
-        testlu(parent(A), parent(MF), BF)
-    testlu(A::Transpose, MF, BF) =
-        testlu(parent(A), parent(MF), BF)
-end
+testlu(A::Union{Transpose, Adjoint}, MF, BF) = testlu(parent(A), parent(MF), BF)
 
 @testset "Test LU factorization" begin for _p in (true, false),
                                            T in (Float64, Float32, ComplexF64, ComplexF32,
