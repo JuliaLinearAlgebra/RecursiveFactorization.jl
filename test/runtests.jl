@@ -1,7 +1,7 @@
 using Test
 import RecursiveFactorization
 import LinearAlgebra
-using LinearAlgebra: norm, Adjoint
+using LinearAlgebra: norm, Adjoint, Transpose
 using Random
 
 Random.seed!(12)
@@ -14,7 +14,7 @@ function testlu(A, MF, BF)
     @test norm(MF.L * MF.U - A[MF.p, :], Inf) < 200sqrt(eps(real(one(float(first(A))))))
     nothing
 end
-testlu(A::Adjoint, MF::Adjoint, BF) = testlu(parent(A), parent(MF), BF)
+testlu(A::Union{Transpose, Adjoint}, MF, BF) = testlu(parent(A), parent(MF), BF)
 
 @testset "Test LU factorization" begin for _p in (true, false),
                                            T in (Float64, Float32, ComplexF64, ComplexF32,
