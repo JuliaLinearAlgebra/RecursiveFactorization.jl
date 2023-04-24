@@ -5,8 +5,8 @@ if isdefined(Base, :Experimental) &&
 end
 include("./lu.jl")
 
-import SnoopPrecompile
+import PrecompileTools
 
-SnoopPrecompile.@precompile_all_calls begin lu!(rand(2, 2)) end
+PrecompileTools.@compile_workload begin lu!(rand(2, 2)) end
 
 end # module
