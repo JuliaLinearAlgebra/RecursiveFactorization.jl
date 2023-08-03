@@ -7,6 +7,8 @@ include("./lu.jl")
 
 import PrecompileTools
 
-PrecompileTools.@compile_workload begin lu!(rand(2, 2)) end
+PrecompileTools.@compile_workload begin
+    lu!(rand(2, 2))
+end
 
 end # module

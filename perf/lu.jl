@@ -52,22 +52,22 @@ else
     BLAS.vendor() === :mkl ? :MKL : :OpenBLAS
 end
 df = DataFrame(Size = ns,
-               Reference = ref_mflops)
+    Reference = ref_mflops)
 setproperty!(df, blaslib, bas_mflops)
 setproperty!(df, Symbol("RF with default threshold"), rec_mflops)
 setproperty!(df, Symbol("RF fully recursive"), rec4_mflops)
 setproperty!(df, Symbol("RF fully iterative"), rec800_mflops)
 df = stack(df,
-           [Symbol("RF with default threshold"),
-               Symbol("RF fully recursive"),
-               Symbol("RF fully iterative"),
-               blaslib,
-               :Reference], variable_name = :Library, value_name = :GFLOPS)
+    [Symbol("RF with default threshold"),
+        Symbol("RF fully recursive"),
+        Symbol("RF fully iterative"),
+        blaslib,
+        :Reference], variable_name = :Library, value_name = :GFLOPS)
 plt = df |> @vlplot(:line, color={:Library, scale = {scheme = "category10"}},
-              x={:Size}, y={:GFLOPS},
-              width=1000, height=600)
+    x={:Size}, y={:GFLOPS},
+    width=1000, height=600)
 save(joinpath(homedir(), "Pictures",
-              "lu_float64_$(VERSION)_$(Sys.CPU_NAME)_$(nc)cores_$blaslib.png"), plt)
+        "lu_float64_$(VERSION)_$(Sys.CPU_NAME)_$(nc)cores_$blaslib.png"), plt)
 
 #=
 using Plot
