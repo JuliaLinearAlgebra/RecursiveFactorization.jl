@@ -1,7 +1,7 @@
 using LoopVectorization
 using TriangularSolve: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
-    LinearAlgebra, Adjoint, Transpose, UpperTriangular
+    LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
 using StrideArraysCore
 using Polyester: @batch
 
@@ -46,7 +46,8 @@ if CUSTOMIZABLE_PIVOT && isdefined(LinearAlgebra, :_ipiv_cols!)
     end
 end
 if CUSTOMIZABLE_PIVOT && isdefined(LinearAlgebra, :_ipiv_rows!)
-    function LinearAlgebra._ipiv_rows!(::LU{<:Any, <:Any, NotIPIV}, ::OrdinalRange,
+    function LinearAlgebra._ipiv_rows!(::(LU{T, <:AbstractMatrix{T}, NotIPIV} where {T}),
+        ::OrdinalRange,
         B::StridedVecOrMat)
         return B
     end
