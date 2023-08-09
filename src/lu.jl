@@ -289,7 +289,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
             if !iszero(A[kp, k])
                 if k != kp
                     # Interchange
-                    @simd for i in 1:n
+                    @simd warn_check_args=false for i in 1:n
                         tmp = A[k, i]
                         A[k, i] = A[kp, i]
                         A[kp, i] = tmp
