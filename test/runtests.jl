@@ -49,17 +49,17 @@ testlu(A::Union{Transpose, Adjoint}, MF, BF, p) = testlu(parent(A), parent(MF), 
                 MF = mylu(A, p)
                 BF = baselu(A, p)
                 testlu(A, MF, BF, _p)
-                testlu(A, mylu(A, p, Val(false)), BF, false)
+                testlu(A, mylu(A, p, Val(true)), BF, false)
                 A′ = permutedims(A)
                 MF′ = mylu(A′', p)
                 testlu(A′', MF′, BF, _p)
-                testlu(A′', mylu(A′', p, Val(false)), BF, false)
+                testlu(A′', mylu(A′', p, Val(true)), BF, false)
                 i = rand(1:s) # test `MF.info`
                 A[:, i] .= 0
                 MF = mylu(A, p, check = false)
                 BF = baselu(A, p, check = false)
                 testlu(A, MF, BF, _p)
-                testlu(A, mylu(A, p, Val(false), check = false), BF, false)
+                testlu(A, mylu(A, p, Val(true), check = false), BF, false)
             end
         end
     end

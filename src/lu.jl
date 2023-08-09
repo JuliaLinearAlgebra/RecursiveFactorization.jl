@@ -18,7 +18,7 @@ if VERSION >= v"1.7.0-DEV.1188"
     to_stdlib_pivot(::Val{false}) = LinearAlgebra.NoPivot()
 end
 
-function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(true); kwargs...)
+function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(false); kwargs...)
     return lu!(copy(A), normalize_pivot(pivot), thread; kwargs...)
 end
 
