@@ -278,7 +278,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
             kp = k
             if Pivot
                 amax = abs(zero(eltype(A)))
-                @turbo for i in k:m
+                @turbo warn_check_args=false for i in k:m
                     absi = abs(A[i, k])
                     isnewmax = absi > amax
                     kp = isnewmax ? i : kp
@@ -289,7 +289,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
             if !iszero(A[kp, k])
                 if k != kp
                     # Interchange
-                    @simd warn_check_args=false for i in 1:n
+                    @simd for i in 1:n
                         tmp = A[k, i]
                         A[k, i] = A[kp, i]
                         A[kp, i] = tmp
