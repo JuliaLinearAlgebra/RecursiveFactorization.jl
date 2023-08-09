@@ -144,7 +144,8 @@ end
 end
 
 @inline function nsplit(::Type{T}, n) where {T}
-    k = max(2, 512 ÷ (isbitstype(T) ? sizeof(T) : 8))
+    # k = max(2, 512 ÷ (isbitstype(T) ? sizeof(T) : 8))
+    k = max(2, 128 ÷ (isbitstype(T) ? sizeof(T) : 8))
     k_2 = k ÷ 2
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
@@ -277,12 +278,11 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
             kp = k
             if Pivot
                 amax = abs(zero(eltype(A)))
-                for i in k:m
+                @turbo for i in k:m
                     absi = abs(A[i, k])
-                    if absi > amax
-                        kp = i
-                        amax = absi
-                    end
+                    isnewmax = absi > amax
+                    kp = isnewmax ? i : kp
+                    amax = isnewmax ? absi : amax
                 end
                 ipiv[k] = kp
             end
