@@ -59,7 +59,7 @@ if CUSTOMIZABLE_PIVOT
     end
 end
 
-function lu!(A, pivot = Val(true), thread = Val(true); check = true, kwargs...)
+function lu!(A, pivot = Val(true), thread = Val(false); check = true, kwargs...)
     m, n = size(A)
     minmn = min(m, n)
     npivot = normalize_pivot(pivot)
@@ -87,7 +87,7 @@ recurse(_) = false
 _ptrarray(ipiv) = PtrArray(ipiv)
 _ptrarray(ipiv::NotIPIV) = ipiv
 function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
-    pivot = Val(true), thread = Val(true);
+    pivot = Val(true), thread = Val(false);
     check::Bool = true,
     # the performance is not sensitive wrt blocksize, and 8 is a good default
     blocksize::Integer = length(A) ≥ 40_000 ? 8 : 16,
