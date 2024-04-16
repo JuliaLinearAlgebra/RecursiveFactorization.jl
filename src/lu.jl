@@ -168,7 +168,7 @@ Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false})
     for i in axes(P, 1)
         i′ = unsafe_getindex(P, i)
         i′ == i && continue
-        @simd for j in axes(A, 2)
+        for j in axes(A, 2)
             tmp = unsafe_getindex(A, i, j)
             unsafe_setindex!(A, unsafe_getindex(A, i′, j), i, j)
             unsafe_setindex!(A, tmp, i′, j)
@@ -289,7 +289,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
         if !iszero(unsafe_getindex(A, kp, k))
             if k != kp
                 # Interchange
-                @simd for i in 1:n
+                for i in 1:n
                     tmp = unsafe_getindex(A, k, i)
                     unsafe_setindex!(A, unsafe_getindex(A, kp, i), k, i)
                     unsafe_setindex!(A, tmp, kp, i)
