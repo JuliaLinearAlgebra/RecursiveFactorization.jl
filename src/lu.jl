@@ -3,7 +3,7 @@ using TriangularSolve: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
 using StrideArraysCore
-using StrideArraysCore: square_view
+using StrideArraysCore: square_view, unsafe_getindex, unsafe_setindex!
 using Polyester: @batch
 
 # 1.7 compat
@@ -154,11 +154,11 @@ end
 function apply_permutation!(P, A, ::Val{true})
     batchsize = cld(2000, length(P))
     @batch minbatch=batchsize for j in axes(A, 2)
-        @inbounds for i in axes(P, 1)
-            i′ = P[i]
-            tmp = A[i, j]
-            A[i, j] = A[i′, j]
-            A[i′, j] = tmp
+        for i in axes(P, 1)
+            i′ = unsafe_getindex(P, i)
+            tmp = unsafe_getindex(A, i, j)
+            unsafe_setindex!(A, unsafe_getindex(A, i′, j), i, j)
+            unsafe_setindex!(A, tmp, i′, j)
         end
     end
     nothing
@@ -166,12 +166,12 @@ end
 _sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
 Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false})
     for i in axes(P, 1)
-        i′ = P[i]
+        i′ = unsafe_getindex(P, i)
         i′ == i && continue
         @simd for j in axes(A, 2)
-            tmp = A[i, j]
-            A[i, j] = A[i′, j]
-            A[i′, j] = tmp
+            tmp = unsafe_getindex(A, i, j)
+            unsafe_setindex!(A, unsafe_getindex(A, i′, j), i, j)
+            unsafe_setindex!(A, tmp, i′, j)
         end
     end
     nothing
@@ -273,43 +273,41 @@ end
 function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
     m, n = size(A)
     minmn = length(ipiv)
-    @inbounds begin
-        for k in 1:minmn
-            # find index max
-            kp = k
-            if Pivot
-                amax = abs(zero(eltype(A)))
-                @turbo warn_check_args=false for i in k:m
-                    absi = abs(A[i, k])
-                    isnewmax = absi > amax
-                    kp = isnewmax ? i : kp
-                    amax = isnewmax ? absi : amax
-                end
-                ipiv[k] = kp
+    for k in 1:minmn
+        # find index max
+        kp = k
+        if Pivot
+            amax = abs(zero(eltype(A)))
+            @turbo warn_check_args=false for i in k:m
+                absi = abs(A[i, k])
+                isnewmax = absi > amax
+                kp = isnewmax ? i : kp
+                amax = isnewmax ? absi : amax
             end
-            if !iszero(A[kp, k])
-                if k != kp
-                    # Interchange
-                    @simd for i in 1:n
-                        tmp = A[k, i]
-                        A[k, i] = A[kp, i]
-                        A[kp, i] = tmp
-                    end
+            unsafe_setindex!(ipiv, kp, k)
+        end
+        if !iszero(unsafe_getindex(A, kp, k))
+            if k != kp
+                # Interchange
+                @simd for i in 1:n
+                    tmp = unsafe_getindex(A, k, i)
+                    unsafe_setindex!(A, unsafe_getindex(A, kp, i), k, i)
+                    unsafe_setindex!(A, tmp, kp, i)
                 end
-                # Scale first column
-                Akkinv = inv(A[k, k])
-                @turbo check_empty=true warn_check_args=false for i in (k + 1):m
-                    A[i, k] *= Akkinv
-                end
-            elseif info == 0
-                info = k
             end
-            k == minmn && break
-            # Update the rest
-            @turbo warn_check_args=false for j in (k + 1):n
-                for i in (k + 1):m
-                    A[i, j] -= A[i, k] * A[k, j]
-                end
+            # Scale first column
+            Akkinv = inv(unsafe_getindex(A, k, k))
+            @turbo check_empty=true warn_check_args=false for i in (k + 1):m
+                A[i, k] *= Akkinv
+            end
+        elseif info == 0
+            info = k
+        end
+        k == minmn && break
+        # Update the rest
+        @turbo warn_check_args=false for j in (k + 1):n
+            for i in (k + 1):m
+                A[i, j] -= A[i, k] * A[k, j]
             end
         end
     end
