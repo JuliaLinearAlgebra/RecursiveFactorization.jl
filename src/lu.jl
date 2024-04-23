@@ -28,6 +28,8 @@ end
 Base.size(A::NotIPIV) = (A.len,)
 Base.getindex(::NotIPIV, i::Int) = i
 Base.view(::NotIPIV, r::AbstractUnitRange) = NotIPIV(length(r))
+Base.pointer(p::NotIPIV) = p
+StrideArraysCore.PtrArray(p::NotIPIV, sz::Tuple, ::Tuple{Nothing}) = p
 function init_pivot(::Val{false}, minmn)
     @static if CUSTOMIZABLE_PIVOT
         NotIPIV(minmn)
@@ -113,7 +115,8 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
             info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize, thread)
         end
     else # generic fallback
-        info = _generic_lufact!(A, pivot, ipiv, info)
+        info = _generic_lufact!(
+            pointer(A), pivot, size(A, 1), size(A, 2), stride(A, 2), pointer(ipiv), info)
     end
     ((check isa Bool && check) || (check === Val(true))) && checknonsingular(info)
     LU(A, ipiv, info)
@@ -134,7 +137,10 @@ end
 end
 @inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
         ::Val{Thread}) where {Pivot, Thread}
-    info = reckernel!(A, Val(Pivot), m, mnmin, ipiv, info, blocksize, Val(Thread))::Int
+GC.@preserve A ipiv begin
+    info = reckernel!(pointer(A), Val(Pivot), m, mnmin, stride(A, 2),
+        pointer(ipiv), info, blocksize, Val(Thread))::Int
+end
     @inbounds if m < n # fat matrix
         # [AL AR]
         AL = square_view(A, m)
@@ -176,13 +182,15 @@ Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false})
     end
     nothing
 end
-function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, blocksize,
+function reckernel!(Ap::Ptr{T}, pivot::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int},NotIPIV}, info, blocksize,
         thread)::BlasInt where {T, Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            info = _generic_lufact!(A, Val(Pivot), ipiv, info)
+            info = _generic_lufact!(Ap, Val(Pivot), m, n, ax, ip, info)
             return info
         end
+        A = PtrArray(Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
+        ipiv = PtrArray(ip, (n,), (nothing,))
         n1 = nsplit(T, n)
         n2 = n - n1
         m2 = m - n1
@@ -216,7 +224,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        info = reckernel!(AL, Val(Pivot), m, n1, P1, info, blocksize, thread)
+        info = reckernel!(pointer(AL), Val(Pivot), m, n1, ax, pointer(P1), info, blocksize, thread)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
@@ -231,7 +239,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # record info
         previnfo = info
         # P2 A22 = L22 U22
-        info = reckernel!(A22, Val(Pivot), m2, n2, P2, info, blocksize, thread)
+        info = reckernel!(pointer(A22), Val(Pivot), m2, n2, ax, pointer(P2), info, blocksize, thread)
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21, thread)
 
@@ -270,9 +278,10 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
-    m, n = size(A)
-    minmn = length(ipiv)
+function _generic_lufact!(Ap, ::Val{Pivot}, m, n, ax, ip, info) where {Pivot}
+    A = PtrArray(Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
+    minmn = min(m, n)
+    ipiv = PtrArray(ip, (minmn,), (nothing,))
     for k in 1:minmn
         # find index max
         kp = k

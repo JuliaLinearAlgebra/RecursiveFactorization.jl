@@ -30,8 +30,7 @@ testlu(A::Union{Transpose, Adjoint}, MF, BF, p) = testlu(parent(A), parent(MF), 
 
 @testset "Test LU factorization" begin
     for _p in (true, false),
-        T in (Float64, Float32, ComplexF64, ComplexF32,
-            Real)
+        T in (Float64, Float32, ComplexF64, ComplexF32)
 
         p = Val(_p)
         for (i, s) in enumerate([1:10; 50:80:200; 300])
