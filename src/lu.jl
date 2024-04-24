@@ -66,15 +66,11 @@ function lu!(A, pivot = Val(true), thread = Val(false); kwargs...)
     npivot = normalize_pivot(pivot)
     # we want the type on both branches to match. When pivot = Val(false), we construct
     # a `NotIPIV`, which `LinearAlgebra.generic_lufact!` does not.
-    # F = if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
-    #     _F = LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check = false)
-    #     _F.ipiv .-= 1
-    #     _F
-    # else
-    #     F = lu!(A, init_pivot(npivot, minmn), npivot, thread; kwargs...)
-    # end
-    F = lu!(A, init_pivot(npivot, minmn), npivot, thread; kwargs...)
-    return F
+    if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
+        LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check = false)
+    else
+        lu!(A, init_pivot(npivot, minmn), npivot, thread; kwargs...)
+    end
 end
 
 for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!)
