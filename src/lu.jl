@@ -1,4 +1,5 @@
 using LoopVectorization
+using Base: @propagate_inbounds
 using TriangularSolve: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
@@ -60,21 +61,20 @@ if CUSTOMIZABLE_PIVOT
     end
 end
 
-function lu!(A, pivot = Val(true), thread = Val(false);
-        check::Union{Bool, Val{true}, Val{false}} = Val(true), kwargs...)
+function lu!(A, pivot = Val(true), thread = Val(false); kwargs...)
     m, n = size(A)
     minmn = min(m, n)
     npivot = normalize_pivot(pivot)
     # we want the type on both branches to match. When pivot = Val(false), we construct
     # a `NotIPIV`, which `LinearAlgebra.generic_lufact!` does not.
-    F = if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
-        LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot);
-            check = ((check isa Bool && check) || (check === Val(true)))
-        )
-    else
-        lu!(A, init_pivot(npivot, minmn), npivot, thread; check = check,
-            kwargs...)
-    end
+    # F = if pivot === Val(true) && minmn < 10 # avx introduces small performance degradation
+    #     _F = LinearAlgebra.generic_lufact!(A, to_stdlib_pivot(pivot); check = false)
+    #     _F.ipiv .-= 1
+    #     _F
+    # else
+    #     F = lu!(A, init_pivot(npivot, minmn), npivot, thread; kwargs...)
+    # end
+    F = lu!(A, init_pivot(npivot, minmn), npivot, thread; kwargs...)
     return F
 end
 
@@ -83,72 +83,78 @@ for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!
 end
 
 # AVX512 needs a smaller recursion limit
-pick_threshold() = LoopVectorization.register_size() == 64 ? 48 : 40
+pick_threshold() = LoopVectorization.register_size() == 64 ? static(48) : static(40)
 
 recurse(::StridedArray) = true
 recurse(_) = false
 
 _ptrarray(ipiv) = PtrArray(ipiv)
 _ptrarray(ipiv::NotIPIV) = ipiv
-function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
+function _lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         pivot = Val(true), thread = Val(false);
-        check::Union{Bool, Val{true}, Val{false}} = Val(true),
         # the performance is not sensitive wrt blocksize, and 8 is a good default
-        blocksize::Integer = length(A) ≥ 40_000 ? 8 : 16,
-        threshold::Integer = pick_threshold()) where {T}
+        blocksize = static(16),
+        threshold = pick_threshold()) where {T}
     pivot = normalize_pivot(pivot)
-    info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
     if pivot === Val(false) && !CUSTOMIZABLE_PIVOT
-        copyto!(ipiv, 1:mnmin)
+        copyto!(ipiv, 0:(mnmin - 1))
     end
     if recurse(A) && mnmin > threshold
         if T <: Union{Float32, Float64}
             GC.@preserve ipiv A begin
-                info = recurse!(view(PtrArray(A), axes(A)...), pivot,
+                recurse!(view(PtrArray(A), axes(A)...), pivot,
                     m, n, mnmin,
-                    _ptrarray(ipiv), info, blocksize,
+                    _ptrarray(ipiv), blocksize,
                     thread)
             end
         else
-            info = recurse!(A, pivot, m, n, mnmin, ipiv, info, blocksize, thread)
+            recurse!(A, pivot, m, n, mnmin, ipiv, blocksize, thread)
         end
     else # generic fallback
-        info = _generic_lufact!(
-            pointer(A), pivot, size(A, 1), size(A, 2), stride(A, 2), pointer(ipiv), info)
+        _generic_lufact!(
+            pointer(A), pivot, size(A, 1), size(A, 2), stride(A, 2), pointer(ipiv), 0)
     end
-    ((check isa Bool && check) || (check === Val(true))) && checknonsingular(info)
-    LU(A, ipiv, info)
+    LU(A, ipiv, 0)
+end
+function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
+        pivot = Val(true), thread = Val(false);
+        # the performance is not sensitive wrt blocksize, and 8 is a good default
+        blocksize = static(16),
+        threshold = pick_threshold(), check = nothing) where {T}
+    F = _lu!(A, ipiv, pivot, thread; blocksize, threshold)
+    F.ipiv .+= 1
+    F
 end
 
-@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, blocksize,
         ::Val{true}) where {Pivot}
     if length(A) * _sizeof(eltype(A)) >
        0.92 * LoopVectorization.VectorizationBase.cache_size(Val(2))
-        _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(true))
+        _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, blocksize, Val(true))
     else
-        _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(false))
+        _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, blocksize, Val(false))
     end
 end
-@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
+@inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, blocksize,
         ::Val{false}) where {Pivot}
-    _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, info, blocksize, Val(false))
+    _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, blocksize, Val(false))
 end
-@inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
+@inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, blocksize,
         ::Val{Thread}) where {Pivot, Thread}
-GC.@preserve A ipiv begin
-    info = reckernel!(pointer(A), Val(Pivot), m, mnmin, stride(A, 2),
-        pointer(ipiv), info, blocksize, Val(Thread))::Int
-end
+    GC.@preserve A ipiv begin
+        reckernel!(pointer(A), Val(Pivot), m, mnmin, stride(A, 2),
+            pointer(ipiv), blocksize, Val(Thread))
+    end
     @inbounds if m < n # fat matrix
         # [AL AR]
         AL = square_view(A, m)
         AR = @view A[:, (m + 1):n]
-        Pivot && apply_permutation!(ipiv, AR, Val{Thread}())
+        Pivot && apply_permutation!(ipiv, AR, Val{Thread}(), 0)
         ldiv!(UnitLowerTriangular(AL), AR, Val{Thread}())
     end
-    info
+    nothing
 end
 
 @inline function nsplit(::Type{T}, n) where {T}
@@ -157,11 +163,11 @@ end
     return n >= k ? ((n + k_2) ÷ k) * k_2 : n ÷ 2
 end
 
-function apply_permutation!(P, A, ::Val{true})
+function apply_permutation!(P, A, ::Val{true}, offset)
     batchsize = cld(2000, length(P))
     @batch minbatch=batchsize for j in axes(A, 2)
         for i in axes(P, 1)
-            i′ = unsafe_getindex(P, i)
+            i′ = (unsafe_getindex(P, i) - offset) + 1
             tmp = unsafe_getindex(A, i, j)
             unsafe_setindex!(A, unsafe_getindex(A, i′, j), i, j)
             unsafe_setindex!(A, tmp, i′, j)
@@ -170,24 +176,25 @@ function apply_permutation!(P, A, ::Val{true})
     nothing
 end
 _sizeof(::Type{T}) where {T} = Base.isbitstype(T) ? sizeof(T) : sizeof(Int)
-Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false})
-    for i in axes(P, 1)
-        i′ = unsafe_getindex(P, i)
+Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false}, offset)
+    for i in 0:(length(P) - 1)
+        i′ = unsafe_getindex(P, i + 1) - offset
         i′ == i && continue
-        for j in axes(A, 2)
-            tmp = unsafe_getindex(A, i, j)
-            unsafe_setindex!(A, unsafe_getindex(A, i′, j), i, j)
-            unsafe_setindex!(A, tmp, i′, j)
+        for j in 0:(size(A, 2) - 1)
+            tmp = unsafe_getindex(A, i + 1, j + 1)
+            unsafe_setindex!(A, unsafe_getindex(A, i′ + 1, j + 1), i + 1, j + 1)
+            unsafe_setindex!(A, tmp, i′ + 1, j + 1)
         end
     end
     nothing
 end
-function reckernel!(Ap::Ptr{T}, pivot::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int},NotIPIV}, info, blocksize,
-        thread)::BlasInt where {T, Pivot}
+function reckernel!(
+        Ap::Ptr{T}, pivot::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int}, NotIPIV}, blocksize,
+        thread, offset = 0) where {T, Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            info = _generic_lufact!(Ap, Val(Pivot), m, n, ax, ip, info)
-            return info
+            _generic_lufact!(Ap, Val(Pivot), m, n, ax, ip, offset)
+            return
         end
         A = PtrArray(Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
         ipiv = PtrArray(ip, (n,), (nothing,))
@@ -224,11 +231,12 @@ function reckernel!(Ap::Ptr{T}, pivot::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int},
         #   [ A11 ]   [ L11 ]
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
-        info = reckernel!(pointer(AL), Val(Pivot), m, n1, ax, pointer(P1), info, blocksize, thread)
+        reckernel!(
+            pointer(AL), Val(Pivot), m, n1, ax, pointer(P1), blocksize, thread, offset)
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
         # [ A22 ]    [ 0  ] [ A22 ]
-        Pivot && apply_permutation!(P1, AR, thread)
+        Pivot && apply_permutation!(P1, AR, thread, offset)
         # A12 = L11 U12  =>  U12 = L11 \ A12
         ldiv!(UnitLowerTriangular(A11), A12, thread)
         # Schur complement:
@@ -237,36 +245,32 @@ function reckernel!(Ap::Ptr{T}, pivot::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int},
         #mul!(A22, A21, A12, -one(T), one(T))
         schur_complement!(A22, A21, A12, thread)
         # record info
-        previnfo = info
         # P2 A22 = L22 U22
-        info = reckernel!(pointer(A22), Val(Pivot), m2, n2, ax, pointer(P2), info, blocksize, thread)
+        reckernel!(pointer(A22), Val(Pivot), m2, n2, ax,
+            pointer(P2), blocksize, thread, offset + n1)
         # A21 <- P2 A21
-        Pivot && apply_permutation!(P2, A21, thread)
+        Pivot && apply_permutation!(P2, A21, thread, offset + n1)
 
-        info != previnfo && (info += n1)
-        if Pivot
-            @turbo warn_check_args=false for i in 1:n2
-                P2[i] += n1
-            end
-        end
-        return info
+        # info != previnfo && (info += n1)
+        # return info
     end # inbounds
+    return
 end
 
 function schur_complement!(𝐂, 𝐀, 𝐁, ::Val{THREAD} = Val(true)) where {THREAD}
     # mul!(𝐂,𝐀,𝐁,-1,1)
     if THREAD
-        @tturbo warn_check_args=false for m in 1:size(𝐀, 1), n in 1:size(𝐁, 2)
+        @tturbo warn_check_args=false for m in indices((𝐀, 𝐂), 1), n in indices((𝐁, 𝐂), 2)
             𝐂ₘₙ = zero(eltype(𝐂))
-            for k in 1:size(𝐀, 2)
+            for k in indices((𝐀, 𝐁), (2, 1))
                 𝐂ₘₙ -= 𝐀[m, k] * 𝐁[k, n]
             end
             𝐂[m, n] = 𝐂ₘₙ + 𝐂[m, n]
         end
     else
-        @turbo warn_check_args=false for m in 1:size(𝐀, 1), n in 1:size(𝐁, 2)
+        @turbo warn_check_args=false for m in indices((𝐀, 𝐂), 1), n in indices((𝐁, 𝐂), 2)
             𝐂ₘₙ = zero(eltype(𝐂))
-            for k in 1:size(𝐀, 2)
+            for k in indices((𝐀, 𝐁), (2, 1))
                 𝐂ₘₙ -= 𝐀[m, k] * 𝐁[k, n]
             end
             𝐂[m, n] = 𝐂ₘₙ + 𝐂[m, n]
@@ -278,47 +282,46 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(Ap, ::Val{Pivot}, m, n, ax, ip, info) where {Pivot}
+function _generic_lufact!(Ap, ::Val{Pivot}, m, n, ax, ip, offset) where {Pivot}
     A = PtrArray(Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
     minmn = min(m, n)
     ipiv = PtrArray(ip, (minmn,), (nothing,))
-    for k in 1:minmn
+    for _k in 0:(minmn - 1)
         # find index max
-        kp = k
+        kp = _k
         if Pivot
             amax = abs(zero(eltype(A)))
-            @turbo warn_check_args=false for i in k:m
-                absi = abs(A[i, k])
+            @turbo warn_check_args=false for i in _k:(m - 1)
+                absi = abs(A[i + 1, _k + 1])
                 isnewmax = absi > amax
                 kp = isnewmax ? i : kp
                 amax = isnewmax ? absi : amax
             end
-            unsafe_setindex!(ipiv, kp, k)
+            # @show kp, offset
+            unsafe_setindex!(ipiv, kp + offset, _k + 1)
         end
-        if !iszero(unsafe_getindex(A, kp, k))
-            if k != kp
+        if !iszero(unsafe_getindex(A, kp + 1, _k + 1))
+            if _k != kp
                 # Interchange
-                for i in 1:n
-                    tmp = unsafe_getindex(A, k, i)
-                    unsafe_setindex!(A, unsafe_getindex(A, kp, i), k, i)
-                    unsafe_setindex!(A, tmp, kp, i)
+                for i in 0:(n - 1)
+                    tmp = unsafe_getindex(A, _k + 1, i + 1)
+                    unsafe_setindex!(A, unsafe_getindex(A, kp + 1, i + 1), _k + 1, i + 1)
+                    unsafe_setindex!(A, tmp, kp + 1, i + 1)
                 end
             end
             # Scale first column
-            Akkinv = inv(unsafe_getindex(A, k, k))
-            @turbo check_empty=true warn_check_args=false for i in (k + 1):m
-                A[i, k] *= Akkinv
+            Akkinv = inv(unsafe_getindex(A, _k + 1, _k + 1))
+            @turbo check_empty=true warn_check_args=false for i in (_k + 1):(m - 1)
+                A[i + 1, _k + 1] *= Akkinv
             end
-        elseif info == 0
-            info = k
+            # elseif info == 0
+            #     info = k
         end
-        k == minmn && break
+        _k + 1 == minmn && break
         # Update the rest
-        @turbo warn_check_args=false for j in (k + 1):n
-            for i in (k + 1):m
-                A[i, j] -= A[i, k] * A[k, j]
-            end
+        @turbo warn_check_args=false for j in (_k + 1):(n - 1), i in (_k + 1):(m - 1)
+            A[i + 1, j + 1] -= A[i + 1, _k + 1] * A[_k + 1, j + 1]
         end
     end
-    return info
+    return #info
 end
