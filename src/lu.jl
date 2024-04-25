@@ -1,6 +1,6 @@
 using LoopVectorization
 using Base: @propagate_inbounds
-using TriangularSolve: ldiv!
+using TriangularSolve: ldiv!, schur_complement!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
 using StrideArraysCore
@@ -252,27 +252,6 @@ function reckernel!(
         # return info
     end # inbounds
     return 0
-end
-
-function schur_complement!(𝐂, 𝐀, 𝐁, ::Val{THREAD} = Val(true)) where {THREAD}
-    # mul!(𝐂,𝐀,𝐁,-1,1)
-    if THREAD
-        @tturbo warn_check_args=false for m in indices((𝐀, 𝐂), 1), n in indices((𝐁, 𝐂), 2)
-            𝐂ₘₙ = zero(eltype(𝐂))
-            for k in indices((𝐀, 𝐁), (2, 1))
-                𝐂ₘₙ -= 𝐀[m, k] * 𝐁[k, n]
-            end
-            𝐂[m, n] = 𝐂ₘₙ + 𝐂[m, n]
-        end
-    else
-        @turbo warn_check_args=false for m in indices((𝐀, 𝐂), 1), n in indices((𝐁, 𝐂), 2)
-            𝐂ₘₙ = zero(eltype(𝐂))
-            for k in indices((𝐀, 𝐁), (2, 1))
-                𝐂ₘₙ -= 𝐀[m, k] * 𝐁[k, n]
-            end
-            𝐂[m, n] = 𝐂ₘₙ + 𝐂[m, n]
-        end
-    end
 end
 
 #=
