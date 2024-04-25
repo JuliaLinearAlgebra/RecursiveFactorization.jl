@@ -82,6 +82,11 @@ pick_threshold() = LoopVectorization.register_size() == 64 ? static(48) : static
 
 recurse(::StridedArray) = true
 recurse(_) = false
+const LPtr{T}=Core.LLVMPtr{T,0}
+_lptr(x::Ptr{T}) where {T} = reinterpret(LPtr{T}, x)
+_ptr(x::LPtr{T}) where {T} = reinterpret(Ptr{T}, x)
+_lptr(x::NotIPIV) = x
+_ptr(x::NotIPIV) = x
 
 _ptrarray(ipiv) = PtrArray(ipiv)
 _ptrarray(ipiv::NotIPIV) = ipiv
@@ -109,7 +114,7 @@ function _lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         end
     else # generic fallback
         info = _generic_lufact!(
-            pointer(A), pivot, size(A, 1), size(A, 2), stride(A, 2), pointer(ipiv), 0)
+            _lptr(pointer(A)), pivot, size(A, 1), size(A, 2), stride(A, 2), _lptr(pointer(ipiv)), 0)
     end
     LU(A, ipiv, info)
 end
@@ -136,11 +141,12 @@ end
         ::Val{false}) where {Pivot}
     _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, blocksize, Val(false))
 end
+
 @inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, blocksize,
         ::Val{Thread})::Int where {Pivot, Thread}
     GC.@preserve A ipiv begin
-        info = reckernel!(pointer(A), Val(Pivot), m, mnmin, stride(A, 2),
-            pointer(ipiv), blocksize, Val(Thread), 0)
+        info = reckernel!(_lptr(pointer(A)), Val(Pivot), m, mnmin, stride(A, 2),
+            _lptr(pointer(ipiv)), blocksize, Val(Thread), 0)
         info == 0 || return info
     end
     @inbounds if m < n # fat matrix
@@ -185,14 +191,14 @@ Base.@propagate_inbounds function apply_permutation!(P, A, ::Val{false}, offset)
     nothing
 end
 function reckernel!(
-        Ap::Ptr{T}, _::Val{Pivot}, m, n, ax, ip::Union{Ptr{Int}, NotIPIV}, blocksize,
+        lAp::LPtr{T}, _::Val{Pivot}, m, n, ax, lip::Union{LPtr{Int}, NotIPIV}, blocksize,
         thread, offset::Int)::Int where {T, Pivot}
     @inbounds begin
         if n <= max(blocksize, 1)
-            return _generic_lufact!(Ap, Val(Pivot), m, n, ax, ip, offset)
+            return _generic_lufact!(lAp, Val(Pivot), m, n, ax, lip, offset)
         end
-        A = PtrArray(Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
-        ipiv = ip isa NotIPIV ? ip : PtrArray(ip, (n,), (nothing,), (static(1),), Val((1,)))
+        A = PtrArray(_ptr(lAp), (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
+        ipiv = lip isa NotIPIV ? lip : PtrArray(_ptr(lip), (n,), (nothing,), (static(1),), Val((1,)))
         n1 = nsplit(T, n)
         n2 = n - n1
         m2 = m - n1
@@ -227,7 +233,7 @@ function reckernel!(
         # P [     ] = [     ] U11
         #   [ A21 ]   [ L21 ]
         info = reckernel!(
-            pointer(AL), Val(Pivot), m, n1, ax, pointer(P1), blocksize, thread, offset)
+            _lptr(pointer(AL)), Val(Pivot), m, n1, ax, _lptr(pointer(P1)), blocksize, thread, offset)
         info == 0 || return info
         # [ A12 ]    [ P1 ] [ A12 ]
         # [     ] <- [    ] [     ]
@@ -242,8 +248,8 @@ function reckernel!(
         schur_complement!(A22, A21, A12, thread)
         # record info
         # P2 A22 = L22 U22
-        info = reckernel!(pointer(A22), Val(Pivot), m2, n2, ax,
-            pointer(P2), blocksize, thread, offset + n1)
+        info = reckernel!(_lptr(pointer(A22)), Val(Pivot), m2, n2, ax,
+            _lptr(pointer(P2)), blocksize, thread, offset + n1)
         info == 0 || return info
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21, thread, offset + n1)
@@ -258,12 +264,12 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(Ap, ::Val{Pivot}, m, n, ax, ip, offset::Int)::Int where {Pivot}
+function _generic_lufact!(lAp::LPtr, ::Val{Pivot}, m, n, ax, lip, offset::Int)::Int where {Pivot}
     A = PtrArray(
-        Ap, (m, n), (nothing, StrideArraysCore.StrideReset(ax)),
+        _ptr(lAp), (m, n), (nothing, StrideArraysCore.StrideReset(ax)),
         (static(0), static(0)), Val((1, 2)))
     minmn = min(m, n)
-    ipiv = ip isa NotIPIV ? ip : PtrArray(ip, (minmn,), (nothing,), (static(0),), Val((1,)))
+    ipiv = lip isa NotIPIV ? lip : PtrArray(_ptr(lip), (minmn,), (nothing,), (static(0),), Val((1,)))
     for _k in 0:(minmn - 1)
         # find index max
         kp = _k
