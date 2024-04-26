@@ -83,15 +83,15 @@ pick_threshold() = LoopVectorization.register_size() == 64 ? static(48) : static
 recurse(::StridedArray) = true
 recurse(_) = false
 const LPtr{T}=Core.LLVMPtr{T,0}
-_lptr(x::Ptr{T}) where {T} = reinterpret(LPtr{T}, x)
-_ptr(x::LPtr{T}) where {T} = reinterpret(Ptr{T}, x)
+_lptr(x::Ptr{T}) where {T} = Base.bitcast(LPtr{T}, x)::LPtr{T}
+_ptr(x::LPtr{T}) where {T} = Base.bitcast(Ptr{T}, x)::Ptr{T}
 _lptr(x::NotIPIV) = x
 _ptr(x::NotIPIV) = x
 
 _ptrarray(ipiv) = PtrArray(ipiv)
 _ptrarray(ipiv::NotIPIV) = ipiv
 function _lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
-        pivot = Val(true), thread = Val(false),
+        pivot = LinearAlgebra.RowMaximum(), thread = Val(false),
         # the performance is not sensitive wrt blocksize, and 8 is a good default
         blocksize = static(16),
         threshold = pick_threshold()) where {T}
