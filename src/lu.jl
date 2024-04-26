@@ -91,7 +91,7 @@ _ptr(x::NotIPIV) = x
 _ptrarray(ipiv) = PtrArray(ipiv)
 _ptrarray(ipiv::NotIPIV) = ipiv
 function _lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
-        pivot = Val(true), thread = Val(false);
+        pivot = Val(true), thread = Val(false),
         # the performance is not sensitive wrt blocksize, and 8 is a good default
         blocksize = static(16),
         threshold = pick_threshold()) where {T}
@@ -123,7 +123,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         # the performance is not sensitive wrt blocksize, and 8 is a good default
         blocksize = static(16),
         threshold = pick_threshold(), check = nothing) where {T}
-    F = _lu!(A, ipiv, pivot, thread; blocksize, threshold)
+    F = _lu!(A, ipiv, pivot, thread, blocksize, threshold)
     (F.ipiv isa NotIPIV) || (F.ipiv .+= 1)
     F
 end
