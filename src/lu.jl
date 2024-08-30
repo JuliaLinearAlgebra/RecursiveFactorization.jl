@@ -1,8 +1,11 @@
 using LoopVectorization
 using Base: @propagate_inbounds
-using TriangularSolve: ldiv!, schur_complement!
+# using TriangularSolve: ldiv!, schur_complement!
+using TriangularSolve: schur_complement!
+using LinearAlgebra: ldiv!
 using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
+import TriangularSolve
 using StrideArraysCore
 using StrideArraysCore: square_view, unsafe_getindex, unsafe_setindex!
 using Polyester: @batch
@@ -144,33 +147,46 @@ end
 
 # to ensure we have the call, so we can substitute it for JuliaSimCompilerRuntime
 @noinline function _ldiv!(
-        pA::Core.LLVMPtr{Float64, 0}, pB::Core.LLVMPtr{Float64, 0}, M::Int, N::Int)
-    A = PtrArray(Base.bitcast(Ptr{Float64}, pA), (M, M))
-    B = PtrArray(Base.bitcast(Ptr{Float64}, pB), (M, N))
-    # We're just generating code and substituting this function for `TriangularSolve.ldiv!`
-    # We have the naive implementaiton here instead to save time, i.e., save us from having to delete an entire callgraph when we replace this definition wth a declaration.
-    # TriangularSolve.ldiv!(UnitLowerTriangular(A), B, Val(false))
-    @inbounds for k in 1:N
-        C1 = B[1, k] = 1.0 \ B[1, k]
-        # fill C-column
-        for i in 2:M
-            B[i, k] = 1.0 \ B[i, k] - A[i, 1] * C1
-        end
-        for j in 2:M
-            Cj = B[j, k]
-            for i in (j + 1):M
-                B[i, k] -= A[i, j] * Cj
-            end
-        end
-    end
-    return nothing
+        pA::Core.LLVMPtr{Float64, 0}, pB::Core.LLVMPtr{Float64, 0}, M::Int, N::Int, xA::Int, xB::Int)
+
+  A = PtrArray(Base.bitcast(Ptr{Float64}, pA), (M, M), (nothing, xA))
+  B = PtrArray(Base.bitcast(Ptr{Float64}, pB), (M, N), (nothing, xB))
+  TriangularSolve.ldiv!(UnitLowerTriangular(A), B, Val(false))
+  return nothing
+
+    # A = PtrArray(Base.bitcast(Ptr{Float64}, pA), (M, M), (nothing, xA))
+    # B = PtrArray(Base.bitcast(Ptr{Float64}, pB), (M, N), (nothing, xB))
+    # # We're just generating code and substituting this function for `TriangularSolve.ldiv!`
+    # # We have the naive implementaiton here instead to save time, i.e., save us from having to delete an entire callgraph when we replace this definition wth a declaration.
+    # if false
+    # # if true
+    #     TriangularSolve.ldiv!(UnitLowerTriangular(A), B)
+    # else
+    #     @inbounds for k in 1:N
+    #         C1 = B[1, k] = 1.0 \ B[1, k]
+    #         # fill C-column
+    #         for i in 2:M
+    #             B[i, k] = 1.0 \ B[i, k] - A[i, 1] * C1
+    #         end
+    #         for j in 2:M
+    #             Cj = B[j, k]
+    #             for i in (j + 1):M
+    #                 B[i, k] -= A[i, j] * Cj
+    #             end
+    #         end
+    #     end
+    # end
+    # return nothing
 end
 function _ldiv!(A::UnitLowerTriangular, B::AbstractMatrix)
     M, N = size(B)
     Ad = A.data
+    xA = stride(Ad, 2)
+    xB = stride(B, 2)
     T = Core.LLVMPtr{Float64, 0}
     GC.@preserve Ad B begin
-        _ldiv!(Base.bitcast(T, pointer(Ad)), Base.bitcast(T, pointer(B)), Int(M), Int(N))
+        _ldiv!(Base.bitcast(T, pointer(Ad)), Base.bitcast(T, pointer(B)),
+            Int(M), Int(N), Int(xA), Int(xB))
     end
 end
 
