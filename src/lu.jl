@@ -82,7 +82,7 @@ pick_threshold() = LoopVectorization.register_size() == 64 ? static(48) : static
 
 recurse(::StridedArray) = true
 recurse(_) = false
-const LPtr{T}=Core.LLVMPtr{T,0}
+const LPtr{T} = Core.LLVMPtr{T, 0}
 _lptr(x::Ptr{T}) where {T} = Base.bitcast(LPtr{T}, x)::LPtr{T}
 _ptr(x::LPtr{T}) where {T} = Base.bitcast(Ptr{T}, x)::Ptr{T}
 _lptr(x::NotIPIV) = x
@@ -142,6 +142,38 @@ end
     _recurse!(A, Val{Pivot}(), m, n, mnmin, ipiv, blocksize, Val(false))
 end
 
+# to ensure we have the call, so we can substitute it for JuliaSimCompilerRuntime
+@noinline function _ldiv!(
+        pA::Core.LLVMPtr{Float64, 0}, pB::Core.LLVMPtr{Float64, 0}, M::Int, N::Int)
+    A = PtrArray(Base.bitcast(Ptr{Float64}, pA), (M, M))
+    B = PtrArray(Base.bitcast(Ptr{Float64}, pB), (M, N))
+    # We're just generating code and substituting this function for `TriangularSolve.ldiv!`
+    # We have the naive implementaiton here instead to save time, i.e., save us from having to delete an entire callgraph when we replace this definition wth a declaration.
+    # TriangularSolve.ldiv!(UnitLowerTriangular(A), B, Val(false))
+    @inbounds for k in 1:N
+        C1 = B[1, k] = 1.0 \ B[1, k]
+        # fill C-column
+        for i in 2:M
+            B[i, k] = 1.0 \ B[i, k] - A[i, 1] * C1
+        end
+        for j in 2:M
+            Cj = B[j, k]
+            for i in (j + 1):M
+                B[i, k] -= A[i, j] * Cj
+            end
+        end
+    end
+    return nothing
+end
+function _ldiv!(A::UnitLowerTriangular, B::AbstractMatrix)
+    M, N = size(B)
+    Ad = A.data
+    T = Core.LLVMPtr{Float64, 0}
+    GC.@preserve Ad B begin
+        _ldiv!(Base.bitcast(T, pointer(Ad)), Base.bitcast(T, pointer(B)), Int(M), Int(N))
+    end
+end
+
 @inline function _recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, blocksize,
         ::Val{Thread})::Int where {Pivot, Thread}
     GC.@preserve A ipiv begin
@@ -154,7 +186,7 @@ end
         AL = square_view(A, m)
         AR = @view A[:, (m + 1):n]
         Pivot && apply_permutation!(ipiv, AR, Val{Thread}(), 0)
-        ldiv!(UnitLowerTriangular(AL), AR, Val{Thread}())
+        _ldiv!(UnitLowerTriangular(AL), AR)
     end
     0
 end
@@ -198,7 +230,8 @@ function reckernel!(
             return _generic_lufact!(lAp, Val(Pivot), m, n, ax, lip, offset)
         end
         A = PtrArray(_ptr(lAp), (m, n), (nothing, StrideArraysCore.StrideReset(ax)))
-        ipiv = lip isa NotIPIV ? lip : PtrArray(_ptr(lip), (n,), (nothing,), (static(1),), Val((1,)))
+        ipiv = lip isa NotIPIV ? lip :
+               PtrArray(_ptr(lip), (n,), (nothing,), (static(1),), Val((1,)))
         n1 = nsplit(T, n)
         n2 = n - n1
         m2 = m - n1
@@ -240,7 +273,7 @@ function reckernel!(
         # [ A22 ]    [ 0  ] [ A22 ]
         Pivot && apply_permutation!(P1, AR, thread, offset)
         # A12 = L11 U12  =>  U12 = L11 \ A12
-        ldiv!(UnitLowerTriangular(A11), A12, thread)
+        _ldiv!(UnitLowerTriangular(A11), A12)
         # Schur complement:
         # We have A22 = L21 U12 + A′22, hence
         # A′22 = A22 - L21 U12
@@ -264,12 +297,14 @@ end
     Modified from https://github.com/JuliaLang/julia/blob/b56a9f07948255dfbe804eef25bdbada06ec2a57/stdlib/LinearAlgebra/src/lu.jl
     License is MIT: https://julialang.org/license
 =#
-function _generic_lufact!(lAp::LPtr, ::Val{Pivot}, m, n, ax, lip, offset::Int)::Int where {Pivot}
+function _generic_lufact!(
+        lAp::LPtr, ::Val{Pivot}, m, n, ax, lip, offset::Int)::Int where {Pivot}
     A = PtrArray(
         _ptr(lAp), (m, n), (nothing, StrideArraysCore.StrideReset(ax)),
         (static(0), static(0)), Val((1, 2)))
     minmn = min(m, n)
-    ipiv = lip isa NotIPIV ? lip : PtrArray(_ptr(lip), (minmn,), (nothing,), (static(0),), Val((1,)))
+    ipiv = lip isa NotIPIV ? lip :
+           PtrArray(_ptr(lip), (minmn,), (nothing,), (static(0),), Val((1,)))
     for _k in 0:(minmn - 1)
         # find index max
         kp = _k
