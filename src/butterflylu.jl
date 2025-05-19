@@ -11,7 +11,7 @@ function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
                                   T(-0.05), T(0.1)) end
 end
 
-function 🦋generate!(A, ::Val{SEED} = Val(888)) where {SEED}
+function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
     Usz = 2 * size(A, 1)
     Vsz = 2 * size(A, 2)
     uv = similar(A, Usz + Vsz)
