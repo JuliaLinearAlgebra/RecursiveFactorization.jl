@@ -22,11 +22,11 @@ end
 function 🦋workspace(A, ::Val{SEED} = Val(888)) where {SEED}
     A = pad!(A)
     B = similar(A);
-    ws = 🦋generate!(B)
+    ws = 🦋generate_random!(B)
     🦋mul!(copyto!(B, A), ws)
     U, V, B = materializeUV(B, ws)
     F = RecursiveFactorization.lu!(B, Val(false))
-    A, B, U, V, F
+    A, U, V, F
 end
 
 const butterfly_workspace = 🦋workspace;
@@ -126,8 +126,18 @@ end
 function pad!(A)
     M, N = size(A)
     xn = 4 - M % 4
-    A = [A   zeros(N, xn)
-    zeros(xn, N) I(xn)
-    ]
-    A
+    A_new = similar(A, M + xn, N + xn)
+    for j in 1 : N, i in 1 : M
+        @inbounds A_new[i, j] = A[i, j]
+    end
+
+    for j in M + 1 : M + xn, i in 1:M
+        @inbounds A_new[i, j] = 0
+        @inbounds A_new[j, i] = 0
+    end
+
+    for i in M + 1 : M + xn, j in N + 1 : N + xn
+        @inbounds A_new[i,j] = i == j
+    end
+    A_new
 end

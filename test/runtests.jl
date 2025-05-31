@@ -81,7 +81,7 @@ end
     for i in 790 : 810
         A = wilkinson(i)
         b = rand(i)
-        A_ext, B, U, V, F = RecursiveFactorization.🦋workspace(A)
+        A_ext, U, V, F = RecursiveFactorization.🦋workspace(A)
         M, N = size(A)
         xn = 4 - M % 4
         b_ext = [b; rand(xn)]
