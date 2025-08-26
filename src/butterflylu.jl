@@ -1,8 +1,4 @@
-using VectorizedRNG
-using LinearAlgebra: Diagonal, I
-using LoopVectorization
-using RecursiveFactorization
-using SparseArrays
+using LinearAlgebra, .Threads
 
 struct SparseBandedMatrix{T} <: AbstractMatrix{T}
     size :: Tuple{Int, Int}
@@ -45,9 +41,9 @@ function Base.getindex(M :: SparseBandedMatrix{T}, i :: Int, j :: Int, I :: Int.
     zero(T)
 end
 
-function Base.setindex!(M :: SparseBandedMatrix{T}, val, i :: Int, j :: Int, I :: Int...) where T #TODO IF VAL ISNT OF TYPE T
+function Base.setindex!(M :: SparseBandedMatrix{T}, val, i :: Int, j :: Int, I :: Int...) where T 
     @boundscheck checkbounds(M, i, j, I...) 
-    rows, cols = size(M)
+    rows = size(M, 1)
     wanted_ind = rows - i + j
     ind = searchsortedfirst(M.indices, wanted_ind)
     if (ind > length(M.indices) || M.indices[ind] != wanted_ind)
@@ -85,9 +81,6 @@ function Base.setindex!(M :: SparseBandedMatrix{T}, val, i :: Int, j :: Int, I :
     diagvals
 end
 
-using LinearAlgebra
-using .Threads
-
 # C = Cb + aAB
 function LinearAlgebra.mul!(C :: Matrix{T}, A:: SparseBandedMatrix{T}, B :: Matrix{T}, a :: Number, b :: Number) where T
     @assert size(A, 2) == size(B, 1)
@@ -111,7 +104,7 @@ function LinearAlgebra.mul!(C :: Matrix{T}, A:: SparseBandedMatrix{T}, B :: Matr
                 index_j = location - cols + i 
             end
             #A[index_i, index_j] * B[index_j, j] = C[index_i, j]
-            @simd for j in 1 : size(B, 2)
+            for j in 1 : size(B, 2)
                 C[index_i, j] = fma(val, B[index_j, j], C[index_i, j])
             end
         end
@@ -140,6 +133,50 @@ function LinearAlgebra.mul!(C :: Matrix{T}, A:: Matrix{T}, B :: SparseBandedMatr
                 end
             @simd for j in 1 : size(A, 1)
                 C[j, index_j] = fma(val, A[j, index_i], C[j, index_j])
+            end
+        end
+    end
+    C
+end
+
+function LinearAlgebra.mul!(C :: SparseBandedMatrix{T}, A:: SparseBandedMatrix{T}, B :: SparseBandedMatrix{T}, a :: Number, b :: Number) where T
+    @assert size(A, 2) == size(B, 1)
+    @assert size(A, 1) == size(C, 1)
+    @assert size(B, 2) == size(C, 2)
+
+    C.*=b
+
+    rows_a, cols_a = size(A)
+    rows_b, cols_b = size(B)
+    @inbounds for (ind_a, location_a) in enumerate(A.indices)
+        @threads for i in eachindex(A.diags[ind_a])
+            val_a = A.diags[ind_a][i] * a
+            if location_a < rows_a 
+                index_ia = rows_a - location_a + i 
+                index_ja = i 
+            else
+                index_ia = i 
+                index_ja = location_a - cols_a + i 
+            end
+            min_loc = rows_b - index_ja + 1
+            max_loc = 2 * rows_b - index_ja
+            for (ind_b, location_b) in enumerate(B.indices)
+                #index_ib = index_ja
+                #       if ind < rows(A), then index = (rows - loc + i, i)
+                #rows - loc + j = index_ja, j = index_ja - rows + loc
+                #       else index = (i, loc - cols + i)
+                # if location < rows(B), then 
+                if location_b <= rows_b && location_b >= min_loc
+                    j = index_ja - rows_b + location_b
+                    index_jb = j
+                    val_b = B.diags[ind_b][j]
+                    C[index_ia, index_jb] = muladd(val_a, val_b, C[index_ia, index_jb])         
+                elseif location_b > rows_b && location_b <= max_loc
+                    j = index_ja
+                    index_jb = location_b - cols_b + j 
+                    val_b = B.diags[ind_b][j]
+                    C[index_ia, index_jb] = muladd(val_a, val_b, C[index_ia, index_jb])         
+                end           
             end
         end
     end
@@ -190,6 +227,12 @@ function LinearAlgebra.mul!(C :: Matrix{T}, A:: SparseBandedMatrix{T}, B :: Spar
     C
 end
 
+using VectorizedRNG
+using LinearAlgebra: Diagonal, I
+using LoopVectorization
+using RecursiveFactorization
+using SparseArrays
+
 @inline exphalf(x) = exp(x) * oftype(x, 0.5)
 function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
     T = eltype(wv)
@@ -207,13 +250,13 @@ function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
 end
 
 function 🦋workspace(A, ::Val{SEED} = Val(888)) where {SEED}
-    A = pad!(A)
     B = similar(A);
     ws = 🦋generate_random!(B)
     🦋mul!(copyto!(B, A), ws)
-    U, V, B = materializeUV(B, ws)
+    U, V = materializeUV(B, ws)
     F = RecursiveFactorization.lu!(B, Val(false))
-    A, U, V, F
+
+    U, V, F
 end
 
 const butterfly_workspace = 🦋workspace;
@@ -284,30 +327,7 @@ function diagnegbottom(x)
     Diagonal(y), Diagonal(z)
 end
 
-#🦋(A, B) = [A B
-#            A -B]
-            
-    #Bu2 = [🦋(U₁u, U₁l) 0*I
-    #       0*I 🦋(U₂u, U₂l)]
-# U1u U1l 0 0
-# U1u -U1l 0 0
-#=
-function 🦋!(C, A, B)
-    A1, A2 = size(A)
-    B1, B2 = size(B)
-    @assert A1 == B1
-    for j in 1 : A2, i in 1 : A1
-        C[i, j] = A[i, j]
-        C[i + A1, j] = A[i, j]
-    end
-    for j in A2 + 1 : A2 + B2, i in 1 : A1
-        C[i, j] = B[i, j - A2]
-        C[i + A1, j] = -B[i, j - A2]
-    end
-    C
-end
-=#
-function 🦋!(C, A::Diagonal, B::Diagonal)
+function 🦋2!(C, A::Diagonal, B::Diagonal)
     @assert size(A) == size(B)
     A1 = size(A, 1)
 
@@ -321,19 +341,32 @@ function 🦋!(C, A::Diagonal, B::Diagonal)
     C
 end
 
-function 🦋!(C::SparseBandedMatrix, A::Diagonal, B::Diagonal)
-    @assert size(A) == size(B)
+function 🦋!(A::Matrix, C::SparseBandedMatrix, X::Diagonal, Y::Diagonal)
+    @assert size(X) == size(Y)
+    if (size(X, 1) + size(Y, 1) != size(A, 1))
+        x = size(A, 1) - size(X, 1) - size(Y, 1)
+        setdiagonal!(C, [X.diag; rand(x); -Y.diag], true)
+        setdiagonal!(C, X.diag, true)
+        setdiagonal!(C, Y.diag, false)
+    else
+        setdiagonal!(C, [X.diag; -Y.diag], true)
+        setdiagonal!(C, X.diag, true)
+        setdiagonal!(C, Y.diag, false)
+    end
 
+    C
+end
+
+function 🦋2!(C::SparseBandedMatrix, A::Diagonal, B::Diagonal)
     setdiagonal!(C, [A.diag; -B.diag], true)
     setdiagonal!(C, A.diag, true)
     setdiagonal!(C, B.diag, false)
     C
 end
 
-
 function materializeUV(A, (uv,))
     M, N = size(A)
-    Mh = M >>> 1
+    Mh = M >>> 1    
     Nh = N >>> 1
 
     U₁u, U₁l = diagnegbottom(@view(uv[1:Mh]))
@@ -346,30 +379,46 @@ function materializeUV(A, (uv,))
     #WRITE OUT MERGINGS EXPLICITLY
     #Bu2 = [🦋(U₁u, U₁l) 0*I
     #       0*I 🦋(U₂u, U₂l)]
-    #show size(Bu2)[1] #808
-    #@show size(🦋(V₁u, V₁l))[1] #404
 
     #Bu2 = spzeros(M, N)
+
+    mrng = VectorizedRNG.MutableXoshift(888)
+    T = typeof(uv[1])
+
     Bu2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
     
-    🦋!(view(Bu2, 1 : M ÷ 2, 1 : N ÷ 2), U₁u, U₁l)
-    🦋!(view(Bu2, M ÷ 2 + 1 : M, N ÷ 2 + 1 : N), U₂u, U₂l)
+    🦋2!(view(Bu2, 1 : (M ÷ 4) * 2, 1 : (N ÷ 4) * 2), U₁u, U₁l)
+    🦋2!(view(Bu2, M - M ÷ 4 * 2 + 1: M, N - N ÷ 4 * 2 + 1: N), U₂u, U₂l)
+    rand!(mrng, diag(view(Bu2, 1 : (M ÷ 4) * 2, 1 : (N ÷ 4) * 2)), static(0), T(-0.05), T(0.1))
+
 
     #Bu1 = spzeros(M, N)
     Bu1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
-    🦋!(Bu1, Uu, Ul)
+    🦋!(A, Bu1, Uu, Ul)
 
     #Bv2 = spzeros(M, N)
     Bv2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
 
-    🦋!(view(Bv2, 1 : M ÷ 2, 1 : N ÷ 2), V₁u, V₁l)
-    🦋!(view(Bv2, M ÷ 2 + 1 : M, N ÷ 2 + 1 : N), V₂u, V₂l)
+    🦋2!(view(Bv2, 1 : (M ÷ 4) * 2, 1 : (N ÷ 4) * 2), V₁u, V₁l)
+    🦋2!(view(Bv2, M - M ÷ 4 * 2 + 1: M, N - N ÷ 4 * 2 + 1: N), V₂u, V₂l)
+    rand!(mrng, diag(view(Bv2, 1 : (M ÷ 4) * 2, 1 : (N ÷ 4) * 2)), static(0), T(-0.05), T(0.1))
 
     #Bv1 = spzeros(M, N)
     Bv1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
-    🦋!(Bv1, Vu, Vl)
+    🦋!(A, Bv1, Vu, Vl)
 
-    (Bu2 * Bu1)', Bv2 * Bv1, A
+    #U = similar(A)
+    #U = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
+
+    #mul!(U, Bu2, Bu1, 1, 0)
+
+    #V = similar(A)
+    #V = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
+    #mul!(V, Bv2, Bv1, 1, 0)
+    #U = sparse(U)
+    #V = sparse(V)
+ 
+    (Bu2 * Bu1)', Bv2 * Bv1
 end
 
 function pad!(A)
@@ -390,3 +439,84 @@ function pad!(A)
     end
     A_new
 end
+
+
+
+
+
+
+
+
+
+#=
+using SparseArrays, BenchmarkTools, Random
+
+function get_data1()
+    dim = 5000
+    x = rand(10:75)
+    diag_vals = Vector{Vector{Float64}}(undef, x)
+    diag_locs = randperm(dim * 2 - 1)[1:x]
+    for j in 1:x
+        diag_vals[j] = rand(min(diag_locs[j], 2 * dim - diag_locs[j]))
+    end
+
+    x_butterfly = SparseBandedMatrix{Float64}(diag_locs, diag_vals, dim, dim)
+    x_dense = copy(x_butterfly)
+
+    y = rand(dim, dim)
+    z = zeros(dim, dim)
+
+    @show norm(x_dense*y - x_butterfly * y) 
+    
+    println("Timing dense multiplication.")
+    println("(left-side mul)")
+    @btime x_dense*y;
+    println("(right-side mul)")
+    @btime y*x_dense;
+    println("\nTiming butterfly multiplication.")
+    println("(left-side mul)")
+    @btime x_butterfly*y;
+    println("(right-side mul)")
+    @btime y*x_butterfly;
+    
+    nothing
+end
+
+function get_data2()
+    dim = 1000
+    x = rand(10:40)
+    diag_vals = Vector{Vector{Float64}}(undef, x)
+    diag_locs = randperm(dim * 2 - 1)[1:x]
+    for j in 1:x
+        diag_vals[j] = rand(min(diag_locs[j], 2 * dim - diag_locs[j]))
+    end
+
+    x_butterfly = SparseBandedMatrix{Float64}(diag_locs, diag_vals, dim, dim)
+    x_dense = copy(x_butterfly)
+    x_sparse = sparse(x_dense)
+
+    y = rand(10:40)
+    diag_vals = Vector{Vector{Float64}}(undef, y)
+    diag_locs = randperm(dim * 2 - 1)[1:y]
+    for j in 1:y
+        diag_vals[j] = rand(min(diag_locs[j], 2 * dim - diag_locs[j]))
+    end
+
+    y_butterfly = SparseBandedMatrix{Float64}(diag_locs, diag_vals, dim, dim)
+    y_dense = copy(y_butterfly)
+    y_sparse = sparse(y_dense)
+
+    a = true
+    b = false
+    @assert isapprox(x_butterfly * y_butterfly, x_dense * y_dense)
+    println("Timing butterfly multiplication.")
+    @btime mul!(zeros(dim, dim), x_butterfly, y_butterfly, a, b);
+    println("\nTiming sparse multiplication.")
+    @btime mul!(zeros(dim, dim), x_sparse, y_sparse, a, b);
+    println("\nTiming dense multiplication.")
+    @btime mul!(zeros(dim, dim), x_dense, y_dense, a, b);
+
+    nothing
+end
+=#
+
