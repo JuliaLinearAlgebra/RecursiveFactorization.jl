@@ -81,7 +81,7 @@ end
     for i in 790 : 810
         A = wilkinson(i)
         b = rand(i)
-        A_ext, U, V, F = RecursiveFactorization.🦋workspace(A)
+        U, V, F = RecursiveFactorization.🦋workspace(A, A', A)
         M, N = size(A)
         xn = 4 - M % 4
         b_ext = [b; rand(xn)]
@@ -89,31 +89,3 @@ end
         @test norm(A * x[1:M] .- b) <= 1e-10
     end
 end
-
-i = 800
-A = wilkinson(i)
-b = rand(i)
-U, V, F = RecursiveFactorization.🦋workspace(A)
-x = V * (F \ (U * b))    
-@test norm(A * x .- b) <= 1e-10
-
-#=
-
-i = 8
-A = rand(i, i)
-b = rand(i)
-A_ext, U, V, F = RecursiveFactorization.🦋workspace(A)
-tmp = U * b
-F \ tmp
-(F.L * F.U) \ tmp
-#tmp * F.U ^ -1 * F.L^-1
-F.U \ (tmp / F.L)
-isapprox(F \ tmp, F.U \ (F.L \ tmp))
-
-x = V * (F \ (U * b))    
-
-x = V * (TriangularSolve.ldiv!(UpperTriangular(F.U), TriangularSolve.ldiv!(LowerTriangular(F.L), U * b)))
-
-norm(V * (TriangularSolve.ldiv!(UpperTriangular(F.U), TriangularSolve.ldiv!(LowerTriangular(F.L), U * b)))- V*(F\(U*b)))
-# goal: solve F.L * F.U * x = b
-=#
