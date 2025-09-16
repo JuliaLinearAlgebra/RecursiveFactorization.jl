@@ -20,10 +20,10 @@ function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
     (uv,)
 end
 
-function 🦋workspace(A, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, ::Val{SEED} = Val(888)) where {T, SEED}
+function 🦋workspace(A, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, ::Val{SEED} = Val(888)) where {T, SEED}
     A = pad!(A)
     B = similar(A)
-    ws = 🦋generate_random!(B)
+    ws = 🦋generate_random!(copyto!(B, A))
     🦋mul!(copyto!(B, A), ws)
     U, V = materializeUV(B, ws)
     F = RecursiveFactorization.lu!(B, Val(false))
