@@ -21,7 +21,10 @@ function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
 end
 
 function 🦋workspace(A, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, ::Val{SEED} = Val(888)) where {T, SEED}
-    A = pad!(A)
+    M = size(A, 1)
+    if (M % 4 != 0)
+        A = pad!(A)
+    end
     B = similar(A)
     ws = 🦋generate_random!(copyto!(B, A))
     🦋mul!(copyto!(B, A), ws)
