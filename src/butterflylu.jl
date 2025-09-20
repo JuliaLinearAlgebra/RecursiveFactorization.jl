@@ -20,7 +20,7 @@ function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
     (uv,)
 end
 
-function 🦋workspace(A, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, ::Val{SEED} = Val(888)) where {T, SEED}
+function 🦋workspace(A, b, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, thread, ::Val{SEED} = Val(888)) where {T, SEED}
     M = size(A, 1)
     if (M % 4 != 0)
         A = pad!(A)
@@ -29,9 +29,10 @@ function 🦋workspace(A, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, 
     ws = 🦋generate_random!(copyto!(B, A))
     🦋mul!(copyto!(B, A), ws)
     U, V = materializeUV(B, ws)
-    F = RecursiveFactorization.lu!(B, Val(false))
+    F = RecursiveFactorization.lu!(B, thread)
+    out = similar(b, M)
 
-    U, V, F
+    U, V, F, out
 end
 
 const butterfly_workspace = 🦋workspace;
@@ -41,14 +42,12 @@ function 🦋mul_level!(A, u, v)
     @assert M == length(u) && N == length(v)
     Mh = M >>> 1
     Nh = N >>> 1
-    M2 = M - Mh
-    N2 = N - Nh
     @turbo for n in 1 : Nh
         for m in 1 : Mh
             A11 = A[m, n]
-            A21 = A[m + M2, n]
-            A12 = A[m, n + N2]
-            A22 = A[m + M2, n + N2]
+            A21 = A[m + Mh, n]
+            A12 = A[m, n + Nh]
+            A22 = A[m + Mh, n + Nh]
 
             T1 = A11 + A12
             T2 = A21 + A22
@@ -60,36 +59,16 @@ function 🦋mul_level!(A, u, v)
             C22 = T3 - T4
 
             u1 = u[m]
-            u2 = u[m + M2]
+            u2 = u[m + Mh]
             v1 = v[n]
-            v2 = v[n + N2]
+            v2 = v[n + Nh]
 
             A[m, n] = u1 * C11 * v1
-            A[m + M2, n] = u2 * C21 * v1
-            A[m, n + N2] = u1 * C12 * v2
-            A[m + M2, n + N2] = u2 * C22 * v2
+            A[m + Mh, n] = u2 * C21 * v1
+            A[m, n + Nh] = u1 * C12 * v2
+            A[m + Mh, n + Nh] = u2 * C22 * v2
         end
     end 
-#=
-    if (N % 2 == 1) # N odd
-        n = N2
-        for m in 1:M
-            A[m, n] = u[m] * A[m, n] * v[n]
-        end
-    end
-
-    if (M % 2 == 1) # M odd
-        m = M2
-        for n in 1:N
-            A[m, n] = u[m] * A[m, n] * v[n]
-        end
-    end
-
-    if (M % 2 == 1) && (N % 2 == 1)
-        m = M2
-        n = N2
-        A[m, n] /= (u[m] * v[n])  
-    end =#
 end
 
 function 🦋mul!(A, (uv,))
@@ -98,8 +77,8 @@ function 🦋mul!(A, (uv,))
     Mh = M >>> 1
 
     U₁ = @view(uv[1:Mh]) 
-    V₁ = @view(uv[(Mh + 1):(2 * Mh)]) 
-    U₂ = @view(uv[(1 + 2 * Mh):(M + Mh)]) 
+    V₁ = @view(uv[(Mh + 1):(M)]) 
+    U₂ = @view(uv[(1 + M):(M + Mh)]) 
     V₂ = @view(uv[(1 + M + Mh):(2 * M)]) 
 
     🦋mul_level!(@view(A[1:Mh, 1:Mh]), U₁, V₁) 
