@@ -2,7 +2,7 @@ using VectorizedRNG
 using LinearAlgebra: Diagonal, I
 using LoopVectorization
 using RecursiveFactorization
-using SparseArrays, SparseBandedMatrices
+using SparseBandedMatrices
 
 @inline exphalf(x) = exp(x) * oftype(x, 0.5)
 function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
