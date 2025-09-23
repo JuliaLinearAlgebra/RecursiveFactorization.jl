@@ -160,17 +160,14 @@ function materializeUV(A, (uv,))
     🦋2!(view(Bu2, 1 : Mh, 1 : Nh), U₁u, U₁l)
     🦋2!(view(Bu2, Mh + 1: M, Nh + 1: N), U₂u, U₂l)
 
-    #Bu1 = spzeros(M, N)
     Bu1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
     🦋!(A, Bu1, Uu, Ul)
 
-    #Bv2 = spzeros(M, N)
     Bv2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
 
     🦋2!(view(Bv2, 1 : Mh, 1 : Nh), V₁u, V₁l)
     🦋2!(view(Bv2, Mh + 1: M, Nh + 1: N), V₂u, V₂l)
 
-    #Bv1 = spzeros(M, N)
     Bv1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
     🦋!(A, Bv1, Vu, Vl)
 
