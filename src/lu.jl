@@ -21,6 +21,8 @@ function lu(A::AbstractMatrix, pivot = Val(true), thread = Val(false); kwargs...
 end
 
 const CUSTOMIZABLE_PIVOT = VERSION >= v"1.8.0-DEV.1507"
+# Julia 1.11+ uses negative info for NoPivot() failures
+const NOPIVOT_NEGATIVE_INFO = VERSION >= v"1.11.0-DEV"
 
 struct NotIPIV <: AbstractVector{BlasInt}
     len::Int
@@ -237,7 +239,7 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
 
         if info != previnfo
             # Handle negative info for NoPivot (Julia 1.11+ convention)
-            if info < 0
+            if NOPIVOT_NEGATIVE_INFO && info < 0
                 info -= n1
             else
                 info += n1
@@ -311,7 +313,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
             elseif info == 0
                 info = k
                 # Julia 1.11+ convention: negative info for NoPivot
-                if !Pivot
+                if !Pivot && NOPIVOT_NEGATIVE_INFO
                     info = -info
                 end
             end
