@@ -116,7 +116,7 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
         info = _generic_lufact!(A, pivot, ipiv, info)
     end
     ((check isa Bool && check) || (check === Val(true))) && checknonsingular(info)
-    LU(A, ipiv, info)
+    LU(A, ipiv, -info)
 end
 
 @inline function recurse!(A, ::Val{Pivot}, m, n, mnmin, ipiv, info, blocksize,
@@ -302,7 +302,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
                     A[i, k] *= Akkinv
                 end
             elseif info == 0
-                info = -k
+                info = k
             end
             k == minmn && break
             # Update the rest
