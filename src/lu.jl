@@ -302,7 +302,7 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
                     A[i, k] *= Akkinv
                 end
             elseif info == 0
-                info = k
+                info = -k
             end
             k == minmn && break
             # Update the rest
