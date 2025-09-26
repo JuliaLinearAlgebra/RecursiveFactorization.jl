@@ -235,7 +235,14 @@ function reckernel!(A::AbstractMatrix{T}, pivot::Val{Pivot}, m, n, ipiv, info, b
         # A21 <- P2 A21
         Pivot && apply_permutation!(P2, A21, thread)
 
-        info != previnfo && (info += n1)
+        if info != previnfo
+            # Handle negative info for NoPivot (Julia 1.11+ convention)
+            if info < 0
+                info -= n1
+            else
+                info += n1
+            end
+        end
         if Pivot
             @turbo warn_check_args=false for i in 1:n2
                 P2[i] += n1
@@ -303,6 +310,10 @@ function _generic_lufact!(A, ::Val{Pivot}, ipiv, info) where {Pivot}
                 end
             elseif info == 0
                 info = k
+                # Julia 1.11+ convention: negative info for NoPivot
+                if !Pivot
+                    info = -info
+                end
             end
             k == minmn && break
             # Update the rest
