@@ -64,3 +64,32 @@ testlu(A::Union{Transpose, Adjoint}, MF, BF, p) = testlu(parent(A), parent(MF), 
         end
     end
 end
+
+function wilkinson(N)
+    A = zeros(N, N)
+    A[1:(N+1):N*N] .= 1
+    A[:, end] .= 1
+    for n in 1:(N - 1)
+        for r in (n + 1):N
+            @inbounds A[r, n] = -1
+        end
+    end
+    A
+end
+
+@testset "🦋" begin
+    for i in 790 : 810
+        A = wilkinson(i)
+        b = rand(i)
+        U, V, F, out = RecursiveFactorization.🦋workspace(A, b, A, A', A, Val(true))
+        M = size(A, 1)
+        xn = 4 - M % 4
+        if (M % 4 != 0)
+            xn = 4 - M % 4
+            b = [b; rand(xn)]
+        end
+        sol = V * (F \ (U * b))  
+        out .= @view sol[1:M]  
+        @test norm(A * out .- b[1:M]) <= 1e-10
+    end
+end

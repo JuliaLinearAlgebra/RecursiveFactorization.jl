@@ -4,6 +4,7 @@ if isdefined(Base, :Experimental) &&
     @eval Base.Experimental.@max_methods 1
 end
 include("./lu.jl")
+include("./butterflylu.jl")
 
 import PrecompileTools
 
