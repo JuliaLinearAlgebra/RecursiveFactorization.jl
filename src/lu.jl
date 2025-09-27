@@ -83,7 +83,7 @@ for (f, T) in [(:adjoint, :Adjoint), (:transpose, :Transpose)], lu in (:lu, :lu!
 end
 
 # AVX512 needs a smaller recursion limit
-pick_threshold() = LoopVectorization.register_size() == 64 ? 48 : 40
+pick_threshold() = 40
 
 recurse(::StridedArray) = true
 recurse(_) = false
