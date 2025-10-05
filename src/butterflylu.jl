@@ -44,7 +44,7 @@ function 🦋lu!(workspace::🦋workspace, M, thread)
     (;A, b, B, ws, U, V, out) = workspace
     🦋mul!(copyto!(B, A), ws)
     materializeUV(U, V, ws)
-    F = RecursiveFactorization.lu!(B, thread)
+    F = RecursiveFactorization.lu!(B, Val(false), thread)
     sol = V * (F \ (U' * b))  
     out .= @view sol[1:M]  
     out
