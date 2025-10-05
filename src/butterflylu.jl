@@ -5,7 +5,7 @@ using RecursiveFactorization
 using SparseBandedMatrices
 
 @inline exphalf(x) = exp(x) * oftype(x, 0.5)
-function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
+function generate_rand_butterfly_vals!(wv, ::Val{SEED} = Val(888)) where {SEED}
     T = eltype(wv)
     mrng = VectorizedRNG.MutableXoshift(SEED)
     GC.@preserve mrng begin rand!(exphalf, VectorizedRNG.Xoshift(mrng), wv, static(0),
@@ -13,26 +13,41 @@ function 🦋!(wv, ::Val{SEED} = Val(888)) where {SEED}
 end
 
 function 🦋generate_random!(A, ::Val{SEED} = Val(888)) where {SEED}
-    Usz = 2 * size(A, 1)
-    Vsz = 2 * size(A, 2)
-    uv = similar(A, Usz + Vsz)
-    🦋!(uv, Val(SEED))
-    (uv,)
+    uv = similar(A, 4 * size(A, 1))
+    generate_rand_butterfly_vals!(uv, Val(SEED))
+    uv
+end
+struct 🦋workspace{T}
+    A::Matrix{T}
+    b::Vector{T}
+    B::Matrix{T}
+    ws::Vector{T}
+    U::Matrix{T}
+    V::Matrix{T}
+    out::Vector{T}
+    function 🦋workspace(A, b, ::Val{SEED} = Val(888)) where {SEED}
+        M = size(A, 1)
+        out = similar(b, M)
+        if (M % 4 != 0)
+            A = pad!(A)
+            xn = 4 - M % 4
+            b = [b; rand(xn)]
+        end
+        B = similar(A)
+        U, V = (similar(A), similar(A))
+        ws = 🦋generate_random!(A)
+        new{eltype(A)}(A, b, B, ws, U, V, out)
+    end
 end
 
-function 🦋workspace(A, b, B::Matrix{T}, U::Adjoint{T, Matrix{T}}, V::Matrix{T}, thread, ::Val{SEED} = Val(888)) where {T, SEED}
-    M = size(A, 1)
-    if (M % 4 != 0)
-        A = pad!(A)
-    end
-    B = similar(A)
-    ws = 🦋generate_random!(copyto!(B, A))
+function 🦋lu!(workspace::🦋workspace, M, thread)
+    (;A, b, B, ws, U, V, out) = workspace
     🦋mul!(copyto!(B, A), ws)
-    U, V = materializeUV(B, ws)
+    materializeUV(U, V, ws)
     F = RecursiveFactorization.lu!(B, thread)
-    out = similar(b, M)
-
-    U, V, F, out
+    sol = V * (F \ (U' * b))  
+    out .= @view sol[1:M]  
+    out
 end
 
 const butterfly_workspace = 🦋workspace;
@@ -71,7 +86,7 @@ function 🦋mul_level!(A, u, v)
     end 
 end
 
-function 🦋mul!(A, (uv,))
+function 🦋mul!(A, uv)
     M, N = size(A)
     @assert M == N
     Mh = M >>> 1
@@ -106,6 +121,13 @@ function diagnegbottom(x)
     Diagonal(y), Diagonal(z)
 end
 
+function 🦋!(C::SparseBandedMatrix, A::Diagonal, B::Diagonal)
+    setdiagonal!(C, [A.diag; -B.diag], true)
+    setdiagonal!(C, A.diag, true)
+    setdiagonal!(C, B.diag, false)
+    C
+end
+
 function 🦋2!(C, A::Diagonal, B::Diagonal)
     @assert size(A) == size(B)
     A1 = size(A, 1)
@@ -120,61 +142,35 @@ function 🦋2!(C, A::Diagonal, B::Diagonal)
     C
 end
 
-function 🦋!(A::Matrix, C::SparseBandedMatrix, X::Diagonal, Y::Diagonal)
-    @assert size(X) == size(Y)
-    if (size(X, 1) + size(Y, 1) != size(A, 1))
-        x = size(A, 1) - size(X, 1) - size(Y, 1)
-        setdiagonal!(C, [X.diag; rand(x); -Y.diag], true)
-        setdiagonal!(C, X.diag, true)
-        setdiagonal!(C, Y.diag, false)
-    else
-        setdiagonal!(C, [X.diag; -Y.diag], true)
-        setdiagonal!(C, X.diag, true)
-        setdiagonal!(C, Y.diag, false)
-    end
-
-    C
-end
-
-function 🦋2!(C::SparseBandedMatrix, A::Diagonal, B::Diagonal)
-    setdiagonal!(C, [A.diag; -B.diag], true)
-    setdiagonal!(C, A.diag, true)
-    setdiagonal!(C, B.diag, false)
-    C
-end
-
-function materializeUV(A, (uv,))
-    M, N = size(A)
-    Mh = M >>> 1    
-    Nh = N >>> 1
+function materializeUV(U, V, uv)
+    M = size(U, 1)
+    Mh = M >>> 1   
 
     U₁u, U₁l = diagnegbottom(@view(uv[1:Mh])) #Mh
-    U₂u, U₂l = diagnegbottom(@view(uv[(1 + Mh + Nh):(M + Nh)])) #M2
-    V₁u, V₁l = diagnegbottom(@view(uv[(Mh + 1):(Mh + Nh)])) #Nh
-    V₂u, V₂l = diagnegbottom(@view(uv[(1 + 2 * Mh + Nh):(2 * Mh + N)])) #N2
-    Uu, Ul = diagnegbottom(@view(uv[(1 + M + N):(2 * M + N)])) #M
-    Vu, Vl = diagnegbottom(@view(uv[(1 + 2 * M + N):(2 * M + 2 * N)])) #N
+    U₂u, U₂l = diagnegbottom(@view(uv[(1 + 2 * Mh):(M + Mh)])) #Mh
+    V₁u, V₁l = diagnegbottom(@view(uv[(Mh + 1):(2 * Mh)])) #Mh
+    V₂u, V₂l = diagnegbottom(@view(uv[(1 + 3 * Mh):(2 * Mh + M)])) #Mh
+    Uu, Ul = diagnegbottom(@view(uv[(1 + 2 * M):(3 * M)])) #M
+    Vu, Vl = diagnegbottom(@view(uv[(1 + 3 * M):(4 * M)])) #M
 
-    Bu2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
+    Bu2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, M)
     
-    🦋2!(view(Bu2, 1 : Mh, 1 : Nh), U₁u, U₁l)
-    🦋2!(view(Bu2, Mh + 1: M, Nh + 1: N), U₂u, U₂l)
+    🦋2!(view(Bu2, 1 : Mh, 1 : Mh), U₁u, U₁l)
+    🦋2!(view(Bu2, Mh + 1: M, Mh + 1: M), U₂u, U₂l)
 
-    Bu1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
-    🦋!(A, Bu1, Uu, Ul)
+    Bu1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, M)
+    🦋!(Bu1, Uu, Ul)
 
-    Bv2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
+    Bv2 = SparseBandedMatrix{typeof(uv[1])}(undef, M, M)
 
-    🦋2!(view(Bv2, 1 : Mh, 1 : Nh), V₁u, V₁l)
-    🦋2!(view(Bv2, Mh + 1: M, Nh + 1: N), V₂u, V₂l)
+    🦋2!(view(Bv2, 1 : Mh, 1 : Mh), V₁u, V₁l)
+    🦋2!(view(Bv2, Mh + 1: M, Mh + 1: M), V₂u, V₂l)
 
-    Bv1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, N)
-    🦋!(A, Bv1, Vu, Vl)
+    Bv1 = SparseBandedMatrix{typeof(uv[1])}(undef, M, M)
+    🦋!(Bv1, Vu, Vl)
 
-    U = (Bu2 * Bu1)'
-    V = Bv2 * Bv1
- 
-    U, V
+    mul!(U, Bu2, Bu1)
+    mul!(V, Bv2, Bv1)
 end
 
 function pad!(A)
