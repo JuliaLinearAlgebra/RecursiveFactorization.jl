@@ -81,8 +81,9 @@ end
     for i in 790 : 810
         A = wilkinson(i)
         b = rand(i)
-        ws = RecursiveFactorization.🦋workspace(A, b)    
+        ws = RecursiveFactorization.🦋workspace(copy(A), copy(b))    
         out = RecursiveFactorization.🦋lu!(ws, i, Val(true))
         @test norm(A * out .- b) <= 1e-10
     end
 end
+
