@@ -81,15 +81,9 @@ end
     for i in 790 : 810
         A = wilkinson(i)
         b = rand(i)
-        U, V, F, out = RecursiveFactorization.🦋workspace(A, b, A, A', A, Val(true))
-        M = size(A, 1)
-        xn = 4 - M % 4
-        if (M % 4 != 0)
-            xn = 4 - M % 4
-            b = [b; rand(xn)]
-        end
-        sol = V * (F \ (U * b))  
-        out .= @view sol[1:M]  
-        @test norm(A * out .- b[1:M]) <= 1e-10
+        ws = RecursiveFactorization.🦋workspace(copy(A), copy(b))    
+        out = RecursiveFactorization.🦋lu!(ws, i, Val(true))
+        @test norm(A * out .- b) <= 1e-10
     end
 end
+
