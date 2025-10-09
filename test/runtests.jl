@@ -82,7 +82,7 @@ end
         A = wilkinson(i)
         b = rand(i)
         ws = RecursiveFactorization.🦋workspace(copy(A), copy(b))    
-        out = RecursiveFactorization.🦋lu!(ws, i, Val(true))
+        out = RecursiveFactorization.🦋solve!(ws, Val(true))
         @test norm(A * out .- b) <= 1e-10
     end
 end
