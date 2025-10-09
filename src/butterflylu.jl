@@ -39,12 +39,16 @@ struct 🦋workspace{T}
     end
 end
 
-function 🦋lu!(workspace::🦋workspace, M, thread)
+function 🦋solve!(workspace::🦋workspace, M, thread)
     (;A, b, ws, U, V, out) = workspace
     🦋mul!(A, ws)
     F = RecursiveFactorization.lu!(A, Val(false), thread)
-    sol = V * (F \ (U' * b))  
-    out .= @view sol[1:M]  
+    
+    mul!(b, U', b)
+    ldiv!(b, UnitLowerTriangular(F.factors), b, thread)
+    ldiv!(b, UpperTriangular(F.factors), b, thread)
+    mul!(b, V, b)
+    out .= @view b[1:M]  
     out
 end
 
