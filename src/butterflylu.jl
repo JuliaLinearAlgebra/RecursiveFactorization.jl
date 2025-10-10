@@ -26,7 +26,7 @@ struct 🦋workspace{T}
     out::Vector{T}
     n::Int
     function 🦋workspace(A, b, ::Val{SEED} = Val(888)) where {SEED}
-        N = size(A, 1)
+        len = size(A, 1)
         out = similar(b, N)
         if (M % 4 != 0)
             A = pad!(A)
@@ -36,12 +36,12 @@ struct 🦋workspace{T}
         U, V = (similar(A), similar(A))
         ws = 🦋generate_random!(A)
         materializeUV(U, V, ws)
-        new{eltype(A)}(A, b, ws, U, V, out, N)
+        new{eltype(A)}(A, b, ws, U, V, out, n)
     end
 end
 
 function 🦋solve!(workspace::🦋workspace, thread)
-    (;A, b, ws, U, V, out, N) = workspace
+    (;A, b, ws, U, V, out, n) = workspace
     🦋mul!(A, ws)
     F = RecursiveFactorization.lu!(A, Val(false), thread)
     
@@ -49,7 +49,7 @@ function 🦋solve!(workspace::🦋workspace, thread)
     ldiv!(b, UnitLowerTriangular(F.factors), b, thread)
     ldiv!(b, UpperTriangular(F.factors), b, thread)
     mul!(b, V, b)
-    out .= @view b[1:N]
+    out .= @view b[1:n]
     out
 end
 
