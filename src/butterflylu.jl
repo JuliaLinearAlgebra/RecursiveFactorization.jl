@@ -26,11 +26,11 @@ struct 🦋workspace{T}
     out::Vector{T}
     n::Int
     function 🦋workspace(A, b, ::Val{SEED} = Val(888)) where {SEED}
-        len = size(A, 1)
-        out = similar(b, N)
-        if (M % 4 != 0)
+        n = size(A, 1)
+        out = similar(b, n)
+        if (n % 4 != 0)
             A = pad!(A)
-            xn = 4 - M % 4
+            xn = 4 - n % 4
             b = [b; rand(xn)]
         end
         U, V = (similar(A), similar(A))
