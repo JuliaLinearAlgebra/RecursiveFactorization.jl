@@ -24,27 +24,33 @@ struct 🦋workspace{T}
     U::Matrix{T}
     V::Matrix{T}
     out::Vector{T}
+    tmp::Vector{T}
+    n::Int
     function 🦋workspace(A, b, ::Val{SEED} = Val(888)) where {SEED}
-        M = size(A, 1)
-        out = similar(b, M)
-        if (M % 4 != 0)
+        n = size(A, 1)
+        out = similar(b)
+        if (n % 4 != 0)
             A = pad!(A)
-            xn = 4 - M % 4
+            xn = 4 - n % 4
             b = [b; rand(xn)]
         end
+        tmp = similar(b)
         U, V = (similar(A), similar(A))
         ws = 🦋generate_random!(A)
         materializeUV(U, V, ws)
-        new{eltype(A)}(A, b, ws, U, V, out)
+        new{eltype(A)}(A, b, ws, U, V, out, tmp, n)
     end
 end
 
-function 🦋lu!(workspace::🦋workspace, M, thread)
-    (;A, b, ws, U, V, out) = workspace
+function 🦋solve!(workspace::🦋workspace, thread)
+    (;A, b, ws, U, V, out, tmp, n) = workspace
     🦋mul!(A, ws)
     F = RecursiveFactorization.lu!(A, Val(false), thread)
-    sol = V * (F \ (U' * b))  
-    out .= @view sol[1:M]  
+    
+    mul!(tmp, U', b)
+    ldiv!(F, tmp, thread)
+    mul!(b, V, tmp)
+    out .= @view b[1:n]
     out
 end
 
