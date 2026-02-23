@@ -39,15 +39,16 @@ function _find_binary()
 end
 
 """
-    RecursiveFactorization.build_binary(; force=false, trim=:unsafe_warn)
+    RecursiveFactorization.build_binary(; force=false, trim=:unsafe_warn, bundle=false)
 
-Build the juliac binary for RecursiveFactorization. Requires Julia 1.12+.
+Build the juliac binary for RecursiveFactorization using JuliaC.jl. Requires Julia 1.12+.
 
 # Keyword Arguments
 - `force::Bool=false`: Rebuild even if binary already exists.
 - `trim::Symbol=:unsafe_warn`: Trimming mode (`:safe`, `:unsafe_warn`, or `:no`).
+- `bundle::Bool=false`: If true, bundle libjulia and dependencies for a relocatable binary.
 """
-function build_binary(; force::Bool = false, trim::Symbol = :unsafe_warn)
+function build_binary(; force::Bool = false, trim::Symbol = :unsafe_warn, bundle::Bool = false)
     if VERSION < v"1.12"
         error("Building juliac binary requires Julia 1.12+, currently running $VERSION")
     end
@@ -62,12 +63,6 @@ function build_binary(; force::Bool = false, trim::Symbol = :unsafe_warn)
     shim_src = joinpath(pkg_dir, "juliac", "shim_exe.jl")
     if !isfile(shim_src)
         error("Shim source not found at $shim_src")
-    end
-
-    # Find juliac.jl
-    juliac_jl = joinpath(Sys.BINDIR, "..", "share", "julia", "juliac", "juliac.jl")
-    if !isfile(juliac_jl)
-        error("juliac.jl not found at $juliac_jl. Ensure Julia 1.12+ is installed.")
     end
 
     # Prepare output directory
@@ -96,20 +91,43 @@ function build_binary(; force::Bool = false, trim::Symbol = :unsafe_warn)
         Pkg.instantiate()
     "```)
 
-    trim_flag = if trim === :safe
-        "--trim=safe"
+    trim_mode = if trim === :safe
+        "safe"
     elseif trim === :unsafe_warn
-        "--trim=unsafe-warn"
+        "unsafe-warn"
+    elseif trim === :no
+        nothing
     else
-        "--trim=no"
+        error("Unknown trim mode: $trim. Use :safe, :unsafe_warn, or :no.")
     end
 
-    @info "Building juliac binary (this may take a few minutes)..."
-    build_env = copy(ENV)
-    build_env["JULIA_PROJECT"] = build_dir
-    run(setenv(
-        `$(Base.julia_cmd()) $juliac_jl --output-exe $binary_path --experimental $trim_flag $shim_src`,
-        build_env))
+    @info "Building juliac binary via JuliaC.jl (this may take a few minutes)..."
+
+    # Use JuliaC.jl for the compile → link → bundle pipeline
+    @eval import JuliaC
+    img = JuliaC.ImageRecipe(;
+        output_type = "--output-exe",
+        trim_mode = trim_mode,
+        file = shim_src,
+        project = build_dir,
+    )
+    JuliaC.compile_products(img)
+
+    link = JuliaC.LinkRecipe(;
+        image_recipe = img,
+        outname = binary_path,
+    )
+    JuliaC.link_products(link)
+
+    if bundle
+        bundle_dir = joinpath(out_dir, "bundle")
+        bun = JuliaC.BundleRecipe(;
+            link_recipe = link,
+            output_dir = bundle_dir,
+        )
+        JuliaC.bundle_products(bun)
+        @info "Bundled binary at $bundle_dir"
+    end
 
     if !isfile(binary_path)
         error("Build failed: binary not found at $binary_path")
@@ -261,8 +279,20 @@ function juliac_lu(A::AbstractMatrix, pivot = Val(true), thread = Val(false); kw
 end
 
 function _init_juliac_server()
+    # Skip server init inside juliac-compiled binaries (we ARE the server)
+    if ccall(:jl_generating_output, Cint, ()) != 0
+        return
+    end
+    # Also skip if the RECFACT_SERVER env var is set (used by the server binary)
+    if haskey(ENV, "RECFACT_SERVER")
+        return
+    end
     if _find_binary() !== nothing
-        _start_server()
+        try
+            _start_server()
+        catch
+            # Server startup may fail in trimmed binaries or other edge cases
+        end
     end
 end
 

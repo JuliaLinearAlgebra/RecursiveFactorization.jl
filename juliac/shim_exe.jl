@@ -1,3 +1,7 @@
+# Signal to RecursiveFactorization.__init__ that we ARE the server binary,
+# so it should not try to start a subprocess server (which would recurse).
+ENV["RECFACT_SERVER"] = "1"
+
 import RecursiveFactorization
 using LinearAlgebra: BlasInt
 
