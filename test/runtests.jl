@@ -87,3 +87,65 @@ end
     end
 end
 
+@testset "Juliac server" begin
+    if RecursiveFactorization._server_available()
+        @info "Juliac server is available, running binary path tests"
+
+        # Test Float64 square
+        for s in (10, 50, 100, 300)
+            A = rand(s, s)
+            E = 20s * eps(Float64)
+            MF = RecursiveFactorization.juliac_lu(A)
+            BF = baselu(A)
+            @test MF.info == BF.info
+            @test norm(MF.L * MF.U - A[MF.p, :], Inf) < E
+        end
+
+        # Test Float32 square
+        for s in (10, 50, 100)
+            A = rand(Float32, s, s)
+            E = 20s * eps(Float32)
+            MF = RecursiveFactorization.juliac_lu(A)
+            BF = baselu(A)
+            @test MF.info == BF.info
+            @test norm(Float64.(MF.L * MF.U) - Float64.(A[MF.p, :]), Inf) < E
+        end
+
+        # Test rectangular (tall and wide)
+        for (m, n) in ((200, 100), (100, 200))
+            A = rand(m, n)
+            E = 20m * eps(Float64)
+            MF = RecursiveFactorization.juliac_lu(A)
+            BF = baselu(A)
+            @test MF.info == BF.info
+            @test norm(MF.L * MF.U - A[MF.p, :], Inf) < E
+        end
+
+        # Test juliac_lu! (mutating)
+        A = rand(100, 100)
+        A_orig = copy(A)
+        MF = RecursiveFactorization.juliac_lu!(A)
+        @test MF.info == 0
+        @test norm(MF.L * MF.U - A_orig[MF.p, :], Inf) < 20 * 100 * eps(Float64)
+
+        # Test singular matrix
+        A = rand(50, 50)
+        A[:, 25] .= 0
+        MF = RecursiveFactorization.juliac_lu(A, check = false)
+        BF = baselu(A, check = false)
+        @test MF.info == BF.info
+
+        # Test consistency with pure-Julia path
+        Random.seed!(42)
+        A1 = rand(100, 100)
+        A2 = copy(A1)
+        F_juliac = RecursiveFactorization.juliac_lu!(A1)
+        F_julia = RecursiveFactorization.lu!(A2)
+        @test F_juliac.info == F_julia.info
+        @test F_juliac.factors ≈ F_julia.factors
+        @test F_juliac.ipiv == F_julia.ipiv
+    else
+        @info "Juliac server not available, skipping binary path tests"
+    end
+end
+
