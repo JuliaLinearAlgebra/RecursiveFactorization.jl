@@ -32,7 +32,8 @@ julia> RecursiveFactorization.lu!(copy(A), Vector{Int}(undef, size(A, 2))); # in
 #### Performance:
 
 For small to medium sized matrices, it is beneficial to use
-`RecursiveFactorization` over `OpenBLAS`. The benchmark script is available in
-`perf/lu.jl`
+`RecursiveFactorization` over `OpenBLAS`. The
+[SciMLBenchmarks LU factorization benchmark](https://docs.sciml.ai/SciMLBenchmarksOutput/stable/LinearSolve/LUFactorization/)
+compares `RFLUFactorization` against the standard alternatives.
 
 ![lubench](https://user-images.githubusercontent.com/17304743/81491200-555b1a80-9259-11ea-95c1-ae98b36f3779.png)
