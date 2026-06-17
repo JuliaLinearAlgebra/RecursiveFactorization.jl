@@ -1,0 +1,7 @@
+Manifest.toml
+recfact_server
+recfact_debug
+*.so
+*.o
+build/
+test_*
