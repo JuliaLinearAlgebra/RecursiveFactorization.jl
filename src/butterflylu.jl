@@ -1,5 +1,5 @@
 using VectorizedRNG
-using LinearAlgebra: Diagonal, I
+using LinearAlgebra: Diagonal, I, mul!
 using LoopVectorization
 using RecursiveFactorization
 using SparseBandedMatrices
