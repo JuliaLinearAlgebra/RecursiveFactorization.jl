@@ -53,10 +53,22 @@ if CUSTOMIZABLE_PIVOT && isdefined(LinearAlgebra, :_ipiv_rows!)
     end
 end
 if CUSTOMIZABLE_PIVOT
+    # TriangularSolve's native kernels take strided *matrix* right-hand sides;
+    # its vector entry point defers to BLAS `trsv` above a size cutoff.  A
+    # contiguous vector presented as an n×1 matrix stays on TriangularSolve's
+    # kernels at every size.  view-then-reshape keeps the wrapper
+    # allocation-free (immutable, passed by value), unlike reshape(::Vector),
+    # which heap-allocates a Matrix header on every solve.
+    _ts_backsolve_rhs(B) = B
+    function _ts_backsolve_rhs(b::StridedVector{T}) where {T <: Union{Float32, Float64}}
+        R = reshape(view(b, :), length(b), 1)
+        return R isa StridedMatrix{T} ? R : b
+    end
     function LinearAlgebra.ldiv!(A::LU{T, <:StridedMatrix, <:NotIPIV},
             B::StridedVecOrMat{T}) where {T <: BlasFloat}
-        tri = @inbounds square_view(A.factors, size(A.factors, 1))
-        ldiv!(UpperTriangular(A.factors), ldiv!(UnitLowerTriangular(A.factors), B))
+        B′ = _ts_backsolve_rhs(B)
+        ldiv!(UpperTriangular(A.factors), ldiv!(UnitLowerTriangular(A.factors), B′))
+        return B
     end
 end
 

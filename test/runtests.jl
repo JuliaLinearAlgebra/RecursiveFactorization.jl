@@ -1,7 +1,9 @@
 using Test
 import RecursiveFactorization
 import LinearAlgebra
-using LinearAlgebra: norm, Adjoint, Transpose, ldiv!
+import TriangularSolve
+using LinearAlgebra: norm, Adjoint, Transpose, ldiv!, UnitLowerTriangular,
+                     UpperTriangular
 using Random
 
 Random.seed!(12)
@@ -78,6 +80,52 @@ end
         @test F.ipiv == 1:n
         x = LinearAlgebra.ldiv!(F, copy(b)) # stdlib LU path consumes F.ipiv
         @test norm(A * x - b) < 1000 * n * eps(real(T))
+    end
+end
+
+@testset "NotIPIV backsolves stay on TriangularSolve's native kernels" begin
+    # The signatures `ldiv!(::LU{..., <:NotIPIV}, ...)` hands to
+    # TriangularSolve.ldiv! must keep resolving to native kernel methods, never
+    # to a catch-all that forwards to LinearAlgebra (= BLAS for BLAS types).
+    catchall2 = which(TriangularSolve.ldiv!, Tuple{Any, Any})
+    catchall3 = which(TriangularSolve.ldiv!, Tuple{Any, Any, Val{true}})
+    for T in (Float64, Float32)
+        MT = Matrix{T}
+        F = RecursiveFactorization.lu(rand(T, 40, 40) + T(10) * LinearAlgebra.I,
+            Val(false))
+        @test F.ipiv isa RecursiveFactorization.NotIPIV
+        for BT in (Vector{T}, MT)
+            m = which(LinearAlgebra.ldiv!, Tuple{typeof(F), BT})
+            @test m.module === RecursiveFactorization
+        end
+        # a contiguous vector reshapes, allocation-free, to a strided n×1 matrix
+        rhs = RecursiveFactorization._ts_backsolve_rhs(zeros(T, 4))
+        @test rhs isa StridedMatrix{T}
+        RT = typeof(rhs)
+        for W in (UnitLowerTriangular{T, MT}, UpperTriangular{T, MT}),
+            BT in (MT, RT)
+
+            m2 = which(TriangularSolve.ldiv!, Tuple{W, BT})
+            m3 = which(TriangularSolve.ldiv!, Tuple{W, BT, Val{true}})
+            @test m2 !== catchall2
+            @test m3 !== catchall3
+            @test m2.module === TriangularSolve
+            @test m3.module === TriangularSolve
+        end
+    end
+end
+
+@testset "NotIPIV ldiv! correctness across the TriangularSolve size cutoff" begin
+    for T in (Float64, Float32), n in (8, 64, 200, 300)
+        A = rand(T, n, n) + T(10) * LinearAlgebra.I
+        b = rand(T, n)
+        B = rand(T, n, 3)
+        F = RecursiveFactorization.lu(A, Val(false))
+        x = ldiv!(F, copy(b))
+        @test x isa Vector{T}
+        @test norm(A * x - b) < 1000 * n * eps(T)
+        X = ldiv!(F, copy(B))
+        @test norm(A * X - B) < 1000 * n * eps(T)
     end
 end
 
