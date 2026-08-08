@@ -1,6 +1,6 @@
 using LoopVectorization
 using TriangularSolve: ldiv!
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
 using StrideArraysCore
 using StrideArraysCore: square_view

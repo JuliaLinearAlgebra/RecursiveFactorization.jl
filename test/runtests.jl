@@ -151,3 +151,49 @@ end
     end
 end
 
+
+@testset "Factorization panel solves stay on TriangularSolve" begin
+    catchall2 = which(TriangularSolve.ldiv!, Tuple{Any, Any})
+    catchall3 = which(TriangularSolve.ldiv!, Tuple{Any, Any, Val{true}})
+    # (a) The exact panel types the recursive lu! constructs for Float32/Float64
+    # (PtrArray-wrapped views) must resolve to native TriangularSolve kernel
+    # methods, threaded and not.
+    for T in (Float64, Float32)
+        A = rand(T, 100, 100)
+        B = view(RecursiveFactorization.PtrArray(A), axes(A)...)
+        n1 = RecursiveFactorization.nsplit(T, 100)
+        A11 = RecursiveFactorization.square_view(B, n1)
+        A12 = @view B[1:n1, (n1 + 1):100]
+        for V in (Val{false}, Val{true})
+            m = which(TriangularSolve.ldiv!,
+                Tuple{UnitLowerTriangular{T, typeof(A11)}, typeof(A12), V})
+            @test m !== catchall3
+            @test m.module === TriangularSolve
+        end
+    end
+    # (b) Whole-suite sweep: every factorization and backsolve above has already
+    # run.  A TriangularSolve catch-all specialization whose triangular argument
+    # has Float32/Float64 eltype would mean some real-eltype solve silently fell
+    # back to LinearAlgebra/BLAS; none may exist.  Complex specializations are
+    # expected — TriangularSolve has no complex kernels, see (c).
+    flagged = Union{UpperTriangular{Float32}, UpperTriangular{Float64},
+        UnitLowerTriangular{Float32}, UnitLowerTriangular{Float64}}
+    for ca in (catchall2, catchall3), mi in Base.specializations(ca)
+        sig = Base.unwrap_unionall(mi.specTypes)
+        TA = sig.parameters[2]
+        @test !(TA isa Type && TA <: flagged)
+    end
+    # (c) Characterization of the known gap (a finding, not policy): complex
+    # panel solves resolve to the catch-all, i.e. LinearAlgebra -> LAPACK
+    # trtrs!/trsm.  If TriangularSolve gains native complex kernels these flip
+    # and the routing table should be updated.
+    for T in (ComplexF64, ComplexF32)
+        A = rand(T, 100, 100)
+        n1 = RecursiveFactorization.nsplit(T, 100)
+        A11 = RecursiveFactorization.square_view(A, n1)
+        A12 = @view A[1:n1, (n1 + 1):100]
+        m = which(TriangularSolve.ldiv!,
+            Tuple{UnitLowerTriangular{T, typeof(A11)}, typeof(A12), Val{false}})
+        @test m === catchall3
+    end
+end
