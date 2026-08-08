@@ -18,7 +18,12 @@ jobs:
     steps:
     - uses: julia-actions/setup-julia@v1
       with:
-        version: '1'
+        # Pinned to 1.11: SnoopCompile's report_invalidations crashes on Julia
+        # 1.12 binding invalidations (JuliaDebug/SnoopCompile.jl#465), so on '1'
+        # this job has been red since Julia 1.12.0 (2025-10-08).  Revert to '1'
+        # once a fixed SnoopCompile v3.x is out (the action adds it fresh each
+        # run).
+        version: '1.11'
     - uses: actions/checkout@v4
     - uses: julia-actions/julia-buildpkg@v1
     - uses: julia-actions/julia-invalidations@v1
