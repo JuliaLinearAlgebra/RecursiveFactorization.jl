@@ -20,7 +20,7 @@ Polyester = "0.3.2,0.4.1, 0.5, 0.6, 0.7"
 PrecompileTools = "1"
 SparseBandedMatrices = "1"
 StrideArraysCore = "0.5.5"
-TriangularSolve = "0.2.2"
+TriangularSolve = "0.2.5"
 VectorizedRNG = "0.2.25"
 julia = "1.10"
 

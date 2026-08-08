@@ -98,12 +98,10 @@ end
             m = which(LinearAlgebra.ldiv!, Tuple{typeof(F), BT})
             @test m.module === RecursiveFactorization
         end
-        # a contiguous vector reshapes, allocation-free, to a strided n×1 matrix
-        rhs = RecursiveFactorization._ts_backsolve_rhs(zeros(T, 4))
-        @test rhs isa StridedMatrix{T}
-        RT = typeof(rhs)
+        # vector and matrix right-hand sides both resolve to native kernels
+        # (the vector methods require TriangularSolve >= 0.2.5)
         for W in (UnitLowerTriangular{T, MT}, UpperTriangular{T, MT}),
-            BT in (MT, RT)
+            BT in (Vector{T}, MT)
 
             m2 = which(TriangularSolve.ldiv!, Tuple{W, BT})
             m3 = which(TriangularSolve.ldiv!, Tuple{W, BT, Val{true}})
@@ -115,7 +113,7 @@ end
     end
 end
 
-@testset "NotIPIV ldiv! correctness across the TriangularSolve size cutoff" begin
+@testset "NotIPIV ldiv! correctness across small-to-large sizes" begin
     for T in (Float64, Float32), n in (8, 64, 200, 300)
         A = rand(T, n, n) + T(10) * LinearAlgebra.I
         b = rand(T, n)
