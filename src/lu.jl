@@ -100,7 +100,11 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
-    if pivot === Val(false) && !CUSTOMIZABLE_PIVOT
+    # The pivot-free algorithm never writes `ipiv`, but a user-supplied vector
+    # is still returned inside the `LU`; fill it with the identity so consumers
+    # of `F.ipiv` (e.g. `LAPACK.getrs!`, `LinearAlgebra._ipiv_rows!`) see valid
+    # pivots instead of undefined memory.
+    if pivot === Val(false) && !(ipiv isa NotIPIV)
         copyto!(ipiv, 1:mnmin)
     end
     if recurse(A) && mnmin > threshold

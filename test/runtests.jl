@@ -65,6 +65,22 @@ testlu(A::Union{Transpose, Adjoint}, MF, BF, p) = testlu(parent(A), parent(MF), 
     end
 end
 
+@testset "NoPivot lu! with a user-supplied ipiv leaves valid pivots" begin
+    # Stdlib consumers (`LAPACK.getrs!`, `_ipiv_rows!`) read `F.ipiv`; it must
+    # hold the identity, not undefined memory (which crashed in `dlaswp`).
+    for T in (Float64, Float32, ComplexF64)
+        n = 30
+        A = rand(T, n, n) + T(10) * LinearAlgebra.I
+        b = rand(T, n)
+        ipiv = Vector{LinearAlgebra.BlasInt}(undef, n)
+        fill!(ipiv, typemax(LinearAlgebra.BlasInt) - 7) # poison undefined memory
+        F = RecursiveFactorization.lu!(copy(A), ipiv, Val(false), Val(false))
+        @test F.ipiv == 1:n
+        x = LinearAlgebra.ldiv!(F, copy(b)) # stdlib LU path consumes F.ipiv
+        @test norm(A * x - b) < 1000 * n * eps(real(T))
+    end
+end
+
 function wilkinson(N)
     A = zeros(N, N)
     A[1:(N+1):N*N] .= 1
