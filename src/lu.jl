@@ -1,6 +1,6 @@
 using LoopVectorization
 using TriangularSolve: ldiv!
-using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular, BLAS,
+using LinearAlgebra: BlasInt, BlasFloat, LU, UnitLowerTriangular, checknonsingular,
                      LinearAlgebra, Adjoint, Transpose, UpperTriangular, AbstractVecOrMat
 using StrideArraysCore
 using StrideArraysCore: square_view
@@ -53,10 +53,14 @@ if CUSTOMIZABLE_PIVOT && isdefined(LinearAlgebra, :_ipiv_rows!)
     end
 end
 if CUSTOMIZABLE_PIVOT
+    # Both triangular legs run on TriangularSolve's native kernels for matrix
+    # *and* vector right-hand sides; the vector entry requires
+    # TriangularSolve >= 0.2.5 (compat-enforced), where it is BLAS-free at
+    # every size — older versions deferred vectors to BLAS `trsv` above n=128.
     function LinearAlgebra.ldiv!(A::LU{T, <:StridedMatrix, <:NotIPIV},
             B::StridedVecOrMat{T}) where {T <: BlasFloat}
-        tri = @inbounds square_view(A.factors, size(A.factors, 1))
         ldiv!(UpperTriangular(A.factors), ldiv!(UnitLowerTriangular(A.factors), B))
+        return B
     end
 end
 
@@ -100,7 +104,11 @@ function lu!(A::AbstractMatrix{T}, ipiv::AbstractVector{<:Integer},
     info = zero(BlasInt)
     m, n = size(A)
     mnmin = min(m, n)
-    if pivot === Val(false) && !CUSTOMIZABLE_PIVOT
+    # The pivot-free algorithm never writes `ipiv`, but a user-supplied vector
+    # is still returned inside the `LU`; fill it with the identity so consumers
+    # of `F.ipiv` (e.g. `LAPACK.getrs!`, `LinearAlgebra._ipiv_rows!`) see valid
+    # pivots instead of undefined memory.
+    if pivot === Val(false) && !(ipiv isa NotIPIV)
         copyto!(ipiv, 1:mnmin)
     end
     if recurse(A) && mnmin > threshold
