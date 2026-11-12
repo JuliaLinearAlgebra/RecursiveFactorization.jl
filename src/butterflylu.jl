@@ -32,7 +32,7 @@ struct 🦋workspace{T}
         if (n % 4 != 0)
             A = pad!(A)
             xn = 4 - n % 4
-            b = [b; rand(xn)]
+            b = [b; zeros(eltype(b), xn)]
         end
         tmp = similar(b)
         U, V = (similar(A), similar(A))

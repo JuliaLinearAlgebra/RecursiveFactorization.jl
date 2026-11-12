@@ -156,6 +156,15 @@ end
         out = RecursiveFactorization.🦋solve!(ws, Val(true))
         @test norm(A * out .- b) <= 1e-8 * norm(b)
     end
+    # 6 is padded to 8.  The transform mixes the padding of b into the
+    # right-hand side, so padding of order 1 would leave rounding error of
+    # order 1e-16 on a solution of order 1e-12.
+    n = 6
+    A = rand(n, n) + n * LinearAlgebra.I
+    b = 1e-12 * rand(n)
+    ws = RecursiveFactorization.🦋workspace(copy(A), copy(b))
+    out = RecursiveFactorization.🦋solve!(ws, Val(true))
+    @test out ≈ A \ b
 end
 
 
